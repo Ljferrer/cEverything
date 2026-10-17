@@ -90,7 +90,7 @@
     "workingBranch": null,
     "landingBranch": null,
     "learningsTarget": null,
-    "testPattern": null,
+    "testPattern": "*.test.mjs",
     "ghUser": null
   }
 }
