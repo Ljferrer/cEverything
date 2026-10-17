@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createBus } from './bus.js';
-import { hitToEvent, applySelection, rootOf } from './input.js';
+import { hitToEvent, applySelection, rootOf, shouldInstallLaptop } from './input.js';
 
 // A tiny stand-in for a three.js subtree: userData lives on the mesh or on an
 // ancestor, and a raycast hit names the deepest mesh.
@@ -53,4 +53,16 @@ test('rootOf accepts an Object3D or an obelisk wrapper that carries one', () => 
   assert.equal(rootOf({ root: obj }), obj);
   assert.equal(rootOf(null), null);
   assert.equal(rootOf({}), null);
+});
+
+test('shouldInstallLaptop: ?mode=laptop, no navigator.xr, or immersive-vr unsupported installs; supported does not', async () => {
+  const loc = (search) => ({ search });
+  const xr = (supported) => ({ xr: { isSessionSupported: async (m) => m === 'immersive-vr' && supported } });
+  assert.equal(await shouldInstallLaptop(loc('?mode=laptop'), xr(true)), true);
+  assert.equal(await shouldInstallLaptop(loc(''), {}), true);
+  // The phone view: Chrome exposes navigator.xr without immersive-vr.
+  assert.equal(await shouldInstallLaptop(loc(''), xr(false)), true);
+  assert.equal(await shouldInstallLaptop(loc('?share=x'), xr(true)), false);
+  // A rejected probe means no VR session can start, so the laptop view installs.
+  assert.equal(await shouldInstallLaptop(loc(''), { xr: { isSessionSupported: async () => { throw new Error('nope'); } } }), true);
 });
