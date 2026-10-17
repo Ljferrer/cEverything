@@ -13,6 +13,14 @@ import { hitToEvent, applySelection, rootOf, shouldInstallLaptop, latchLast } fr
 
 export const ERROR_MS = 4000;
 
+/**
+ * Where the laptop camera starts: up and out on a diagonal, past the obelisk
+ * ring, its child rings, and the pylons, so the first view shows the whole room
+ * instead of near-band text from the closest obelisk. main.js's (0, 1.6, 3) sits
+ * on the ring; a headset ignores this because its pose drives the camera.
+ */
+export const LAPTOP_START = Object.freeze([7, 6, 7]);
+
 /** The say box target line shows the selected obelisk's title, else its sid, and follows a later retitle. */
 export function showTarget(bus, node, findObelisk) {
   let sid = null;
@@ -48,6 +56,8 @@ export function viewLink(loc = location) {
 export async function install({ camera, renderer, bus, net }) {
   const latchedMode = latchLast(bus, 'mode');
   if (!(await shouldInstallLaptop())) return latchedMode.stop();
+
+  camera.position.set(...LAPTOP_START);
 
   // Orbit camera; OrbitControls handles touch (one finger rotates, two pan and zoom).
   const controls = new OrbitControls(camera, renderer.domElement);
