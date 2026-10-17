@@ -46,6 +46,8 @@ let emit = () => {};
 let ws = null;
 let stopped = true;
 let attachedOnce = false;
+/** Run counter, bumped by `start`: a retry still connecting for an earlier run bails out instead of touching the new run's socket. */
+let gen = 0;
 let retryTimer = null;
 let nextId = 1;
 const pending = new Map();
@@ -55,7 +57,7 @@ const sessions = new Map();
 const slabs = new Map();
 /** sid → in-flight attach promise (idempotent attach, PIN-35). */
 const attaching = new Map();
-/** sids resumed on the current socket; cleared on close so a reconnect resumes again. */
+/** sids resumed on the current socket; `dropSocket` clears it so the next socket resumes again. */
 const resumed = new Set();
 /** `${sid}/${role}` → open slab id for events that carry no message_id. */
 const openSlab = new Map();
@@ -78,6 +80,7 @@ function reset(emitFn) {
   seq.clear();
   echoes = [];
   attachedOnce = false;
+  gen += 1;
 }
 
 const nextSeq = (sid) => {
@@ -134,12 +137,14 @@ function rejectPending(reason) {
 }
 
 /**
- * Drop the current socket, if any: reject its pending requests, detach its
- * listeners, and terminate it. The detached close listener never fires, so
- * `onClose` and its retry do not run for a socket dropped here.
+ * Drop the current socket, if any: reject its pending requests, forget which
+ * sids it resumed, detach its listeners, and terminate it. `onClose` runs the
+ * same teardown on a socket that closed by itself. The detached close listener
+ * never fires, so `onClose` and its retry do not run for a socket dropped here.
  */
 function dropSocket(reason) {
   rejectPending(reason);
+  resumed.clear();
   if (!ws) return;
   const sock = ws;
   ws = null;
@@ -485,14 +490,12 @@ function connect(env) {
   });
 }
 
-/** Handshake on a ready socket: capabilities, then list and attach. Close runs `onClose` only while this socket is still `ws`. */
+/** Handshake on a ready socket: capabilities, then list and attach. */
 async function handshake(sock) {
   ws = sock;
   sock.on('message', onMessage);
   sock.on('error', () => {});
-  sock.on('close', () => {
-    if (sock === ws) onClose();
-  });
+  sock.on('close', onClose);
   try {
     await request('client.capabilities', { server_requests: true });
   } catch {
@@ -502,12 +505,8 @@ async function handshake(sock) {
 }
 
 function onClose() {
-  rejectPending('hermes socket closed');
-  resumed.clear();
-  if (ws) ws.removeAllListeners();
-  ws = null;
-  if (stopped || !attachedOnce) return;
-  scheduleRetry();
+  dropSocket('hermes socket closed');
+  if (!stopped && attachedOnce) scheduleRetry();
 }
 
 function scheduleRetry() {
@@ -515,11 +514,14 @@ function scheduleRetry() {
   retryTimer = setTimeout(async () => {
     retryTimer = null;
     if (stopped) return;
+    const run = gen;
     try {
       const sock = await connect(currentEnv);
-      if (stopped) return sock.terminate();
+      if (stopped || run !== gen) return sock.terminate();
       await handshake(sock);
     } catch {
+      // A newer `start` owns `ws`: `connect` or that start's `stop` already closed this run's socket.
+      if (run !== gen) return;
       // A handshake that failed without a close leaves its socket open: drop it so the next retry owns the only live socket.
       dropSocket('hermes handshake failed');
       if (!stopped) scheduleRetry();
