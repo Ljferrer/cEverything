@@ -109,6 +109,8 @@ Escape guard: batch 1 guard: 2 app-created advisor worktree branches + the lead'
 - every Critical/Major and needsDecision finding above: patched in the plan file by the campaign lead with the plan 2/3 advisor forks' concurrence where they ruled, no probe re-run — AI-declared
 - node --test token checks: every ES<n> End-state check uses --test-reporter=tap, a '^ES<n>\b' name pattern, and both '# pass [1-9]' and '# fail 0' tokens (verified on this machine's Node v24.17.0, where the default reporter is spec even when piped) — AI-declared
 
+- ES<n> checks additionally grep the named '^ *ok N - ES<n>' line, because a name pattern matching no test still prints '# pass 1' (verified on Node v24.17.0 by the plan 6 patch) — AI-declared
+
 ## Residual risk
 - Patches were adjudicated, not re-verified: the ES-named tests and the plan 1 seams (amendments e to q) are proven only when plan 1 lands and the plan's own Done-when runs under WAR.
 - Plan 1's text on master lags its branch: the plan 1 lead reconciles (h) xr.js owning the in-scene label and the as-built seams before its PR; later plans cite the master text.
