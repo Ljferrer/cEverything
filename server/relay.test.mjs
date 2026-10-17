@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, mkdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
 import { WebSocket } from 'ws';
 import { startRelay, parseArgs, VIEW_ONLY } from './relay.mjs';
 
@@ -183,8 +184,17 @@ test('a rejecting source is skipped, synthetic runs; an editor command reaches i
   await writeFile(
     path.join(dir, 'commands', 'say.mjs'),
     `export const name = 'say';\n` +
-      `export async function run(cmd, { emit, ownerOf }) {\n` +
+      `export async function handle(cmd, { emit, ownerOf, commands }) {\n` +
       `  emit({ t: 'slab', sid: cmd.sid, id: 'echo', role: 'user', text: cmd.text + (ownerOf(cmd.sid) ? ' [owned]' : ''), ts: 0 });\n` +
+      `  return { t: 'state', sid: cmd.sid, status: commands.has('say') && commands.has('fork') ? 'working' : 'error' };\n` +
+      `}\n`,
+  );
+  // A second module that delegates to `say` through ctx.commands (the voice → say seam).
+  await writeFile(
+    path.join(dir, 'commands', 'fork.mjs'),
+    `export const name = 'fork';\n` +
+      `export async function handle(cmd, ctx) {\n` +
+      `  return ctx.commands.get('say').handle({ t: 'say', sid: cmd.sid, text: 'forked' }, ctx);\n` +
       `}\n`,
   );
   const logged = [];
@@ -200,10 +210,74 @@ test('a rejecting source is skipped, synthetic runs; an editor command reaches i
   assert.ok(logged.some((l) => l.includes('no source module: missing')));
 
   const c = connect(r, '?key=edit');
+  const other = connect(r);
   await c.until((f) => f.some((x) => x.t === 'session' && x.sid === 'syn-a'));
+  await other.until((f) => f.length >= 1);
   c.send({ t: 'say', sid: 'syn-a', text: 'hi' });
-  const frames = await c.until((f) => f.some((x) => x.t === 'slab' && x.id === 'echo'));
-  assert.equal(frames.find((x) => x.id === 'echo').text, 'hi [owned]');
+  const frames = await c.until((f) => f.some((x) => x.t === 'state' && x.sid === 'syn-a' && x.status === 'working'));
+  assert.equal(frames.find((x) => x.id === 'echo').text, 'hi [owned]', 'emit broadcasts');
+  // The resolved frame reaches only the issuing client.
+  await other.until((f) => f.some((x) => x.id === 'echo'));
+  assert.equal(other.frames.filter((x) => x.t === 'state' && x.status === 'working').length, 0);
+  // One command delegates to another through ctx.commands.
+  c.send({ t: 'fork', sid: 'syn-a' });
+  const forked = await c.until((f) => f.filter((x) => x.t === 'state' && x.status === 'working').length >= 2);
+  assert.ok(forked.some((x) => x.t === 'slab' && x.id === 'echo' && x.text === 'forked [owned]'), 'say ran on behalf of fork');
+  c.ws.close();
+  other.ws.close();
+});
+
+test('a handle that resolves nothing sends nothing back; a rejecting handle answers with an error', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'obelisks-cmd-'));
+  await mkdir(path.join(dir, 'commands'));
+  await writeFile(path.join(dir, 'commands', 'say.mjs'), `export const name = 'say';\nexport async function handle() {}\n`);
+  await writeFile(
+    path.join(dir, 'commands', 'fork.mjs'),
+    `export const name = 'fork';\nexport async function handle() { throw new Error('nope'); }\n`,
+  );
+  const r = await relay({ commandsDir: path.join(dir, 'commands') });
+  const c = connect(r, '?key=edit');
+  await c.until((f) => f.length >= 1);
+  c.send({ t: 'say', sid: 'syn-a', text: 'quiet' });
+  c.send({ t: 'fork', sid: 'syn-a' });
+  const frames = await c.until((f) => f.some((x) => x.t === 'error'));
+  assert.deepEqual(frames.find((x) => x.t === 'error'), { t: 'error', text: 'fork failed: nope' });
+  assert.equal(frames.filter((x) => x.t === 'error').length, 1);
+  c.ws.close();
+});
+
+async function stubSources() {
+  const dir = await mkdtemp(path.join(tmpdir(), 'obelisks-src-'));
+  await mkdir(path.join(dir, 'sources'));
+  const stub = `export async function start({ emit }) { emit({ t: 'session', sid: 'S', harness: 'hermes', kind: 'chat', title: 't', status: 'idle', parent: null, phase: null }); }\n`;
+  await writeFile(path.join(dir, 'sources', 'replay.mjs'), stub);
+  await writeFile(path.join(dir, 'sources', 'hermes.mjs'), stub);
+  return path.join(dir, 'sources');
+}
+
+test('a started source named replay yields mode replay, even beside a live source', async () => {
+  const sourcesDir = await stubSources();
+  const alone = await relay({ sources: 'replay', sourcesDir });
+  assert.equal(alone.mode, 'replay');
+  const c = connect(alone);
+  const [first] = await c.until((f) => f.length >= 1);
+  assert.deepEqual(first, { t: 'mode', mode: 'replay', canEdit: false });
+  c.ws.close();
+  const mixed = await relay({ sources: 'hermes,replay', sourcesDir });
+  assert.equal(mixed.mode, 'replay');
+  const live = await relay({ sources: 'hermes', sourcesDir });
+  assert.equal(live.mode, 'live');
+});
+
+test('a source-emitted mode frame updates the mode and is re-sent composed, never raw', async () => {
+  const r = await relay();
+  const c = connect(r, '?key=edit');
+  await c.until((f) => f.length >= 1);
+  assert.equal(r.broadcast({ t: 'mode', mode: 'replay' }, 'synthetic'), true);
+  const frames = await c.until((f) => f.some((x) => x.t === 'mode' && x.mode === 'replay'));
+  assert.deepEqual(frames.at(-1), { t: 'mode', mode: 'replay', canEdit: true });
+  assert.ok(frames.every((x) => x.t !== 'mode' || typeof x.canEdit === 'boolean'), 'every mode frame carries canEdit');
+  assert.equal(r.mode, 'replay');
   c.ws.close();
 });
 
@@ -221,11 +295,40 @@ test('--record appends every broadcast frame as JSONL', async () => {
   c.ws.close();
 });
 
-test('parseArgs reads --source, --record, --port', () => {
+test('parseArgs reads --source, --record, --port and ignores flags it does not own', () => {
   assert.deepEqual(parseArgs(['--source', 'a,b', '--record', 'x.jsonl', '--port', '0']), {
     sources: 'a,b',
     record: 'x.jsonl',
     port: 0,
   });
   assert.deepEqual(parseArgs(['--source=synthetic']), { sources: 'synthetic' });
+  // --replay, --seed and --fast belong to sources, which read process.argv themselves.
+  assert.deepEqual(parseArgs(['--source', 'synthetic', '--replay', '/dev/null', '--seed', '1', '--fast']), {
+    sources: 'synthetic',
+  });
+  assert.deepEqual(parseArgs([]), {});
+});
+
+test('the CLI still starts with flags it does not own', async () => {
+  const child = spawn(
+    process.execPath,
+    [path.join(HERE, 'relay.mjs'), '--source', 'synthetic', '--replay', '/dev/null', '--seed', '1', '--fast', '--port', '0'],
+    { stdio: ['ignore', 'ignore', 'pipe'] },
+  );
+  let err = '';
+  const listening = new Promise((resolve, reject) => {
+    child.stderr.on('data', (d) => {
+      err += d;
+      const m = err.match(/listening on (\d+), mode (\w+)/);
+      if (m) resolve({ port: Number(m[1]), mode: m[2] });
+    });
+    child.on('exit', (code) => reject(new Error(`relay exited ${code}: ${err}`)));
+  });
+  try {
+    const { port, mode } = await listening;
+    assert.equal(mode, 'synthetic');
+    assert.ok(port > 0);
+  } finally {
+    child.kill();
+  }
 });

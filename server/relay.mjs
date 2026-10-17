@@ -3,17 +3,30 @@
 // re-broadcasts their frames to every client, caches the last 200 slabs per
 // session, and routes editor commands to command modules (PIN-19, PIN-22, PIN-23).
 //
-// A source module exports `start({emit, sendCommand})` and may export
-// `handle(cmd)` and `stop()`. A command module exports `name` (matches the
-// command's `t`) and `run(cmd, {relay, sources, emit, ownerOf})`.
+// A source module exports `start({emit, sendCommand})` and may export `stop()`.
+// A writable source also exports `sendCommand(method, params)`, `titleOf(sid)`,
+// and `slabText(sid, id)`; a source without `sendCommand` is read-only. A
+// command module exports `name` (matches the command's `t`) and
+// `handle(cmd, ctx)`; the relay awaits `handle` and sends its resolved frame
+// (if any) back to the issuing client. `ctx` is `{relay, sources, commands,
+// emit, ownerOf(sid)}`, where `commands` is the loaded command map keyed by
+// `name` so one command can delegate to another (voice → say).
+//
+// Every outbound `{t:'mode', mode, canEdit}` frame is composed here: `mode` is
+// `synthetic` when only the fallback runs, `replay` when a started source is
+// named `replay`, else `live`. A source-emitted `{t:'mode', mode}` only updates
+// that state and is never broadcast raw.
 //
 // CLI: node server/relay.mjs [--source a,b] [--record <file>] [--port 8787]
+// Flags the relay does not own (`--replay`, `--seed`, `--fast`) are ignored
+// here; sources read them from process.argv themselves.
 import { WebSocketServer } from 'ws';
 import { readdir, appendFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { parseArgs as parseCliArgs } from 'node:util';
 import path from 'node:path';
-import { isServerEvent, isClientCommand } from '../shared/protocol.mjs';
+import { isServerEvent, isClientCommand, MODES } from '../shared/protocol.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_SOURCES = ['hermes', 'claude'];
@@ -36,10 +49,11 @@ export async function loadModules(dir) {
   return mods;
 }
 
-function modeFor(started) {
-  if (started.some((n) => n !== 'synthetic' && n !== 'replay')) return 'live';
+/** Compose the mode from the started source names: replay wins, synthetic only when nothing else runs. */
+export function modeFor(started) {
   if (started.includes('replay')) return 'replay';
-  return 'synthetic';
+  if (started.every((n) => n === 'synthetic')) return 'synthetic';
+  return 'live';
 }
 
 export async function startRelay({
@@ -103,13 +117,15 @@ export async function startRelay({
 
   /** Send one validated server frame to every client; `owner` names the emitting source. */
   function broadcast(frame, owner = null) {
+    // A `mode` frame is never broadcast raw: it updates the state and every
+    // client gets the relay's own composed frame with its canEdit.
+    if (frame?.t === 'mode' && MODES.includes(frame.mode)) {
+      setMode(frame.mode);
+      return true;
+    }
     if (!isServerEvent(frame)) {
       log('dropped invalid frame from', owner ?? 'relay', JSON.stringify(frame).slice(0, 200));
       return false;
-    }
-    if (frame.t === 'mode') {
-      setMode(frame.mode);
-      return true;
     }
     remember(frame, owner);
     if (record) appendFile(record, JSON.stringify(frame) + '\n').catch((e) => log('record failed:', e.message));
@@ -123,20 +139,27 @@ export async function startRelay({
     for (const c of relay.clients) sendTo(c, modeFrame(c));
   }
 
-  const ctxFor = () => ({ relay, sources: relay.sources, emit: (f) => broadcast(f), ownerOf: relay.ownerOf });
+  const ctxFor = () => ({ relay, sources: relay.sources, commands, emit: (f) => broadcast(f), ownerOf: relay.ownerOf });
 
-  /** Route one client command as an editor would; sources use this through `sendCommand`. */
+  /** Route one client command as an editor would; sources use this through `sendCommand` (no client, so no reply). */
   async function route(cmd, client) {
     const reply = (text) => client && sendTo(client, { t: 'error', text });
     if (!isClientCommand(cmd)) return reply('bad command');
     if (client && !client.canEdit) return reply(VIEW_ONLY);
     const mod = commands.get(cmd.t);
-    if (!mod?.run) return reply(`no command: ${cmd.t}`);
+    if (!mod?.handle) return reply(`no command: ${cmd.t}`);
+    let result;
     try {
-      await mod.run(cmd, ctxFor());
+      result = await mod.handle(cmd, ctxFor());
     } catch (err) {
       log(`command ${cmd.t} failed:`, err.message);
-      reply(`${cmd.t} failed: ${err.message}`);
+      return reply(`${cmd.t} failed: ${err.message}`);
+    }
+    if (result == null || !client) return;
+    if (isServerEvent(result)) sendTo(client, result);
+    else {
+      log(`command ${cmd.t} resolved an invalid frame:`, JSON.stringify(result).slice(0, 200));
+      reply(`${cmd.t} resolved an invalid frame`);
     }
   }
 
@@ -209,17 +232,18 @@ export async function startRelay({
   return relay;
 }
 
+/** The relay's own flags; anything else (and every positional) is left for sources. */
 export function parseArgs(argv) {
+  const { values } = parseCliArgs({
+    args: argv,
+    options: { source: { type: 'string' }, record: { type: 'string' }, port: { type: 'string' } },
+    strict: false,
+    allowPositionals: true,
+  });
   const opts = {};
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--source') opts.sources = argv[++i];
-    else if (a.startsWith('--source=')) opts.sources = a.slice(9);
-    else if (a === '--record') opts.record = argv[++i];
-    else if (a.startsWith('--record=')) opts.record = a.slice(9);
-    else if (a === '--port') opts.port = Number(argv[++i]);
-    else if (a.startsWith('--port=')) opts.port = Number(a.slice(7));
-  }
+  if (typeof values.source === 'string') opts.sources = values.source;
+  if (typeof values.record === 'string') opts.record = values.record;
+  if (typeof values.port === 'string') opts.port = Number(values.port);
   return opts;
 }
 
