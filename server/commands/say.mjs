@@ -3,12 +3,19 @@
 // The error frame is the resolved value (the relay returns it to the issuer)
 // and is never emitted. Success resolves to `undefined`.
 //
+// The slab id is `'user-' + Date.now() + '-' + <per-module counter>`: the
+// client's `addSlab` replaces a slab whose id repeats, so two `say` calls
+// inside one millisecond (a burst caller, or `pipe` right after `say`) must
+// not share an id. The counter never resets while the module is loaded.
+//
 // `title` is the shared title rule (PIN-36) that fork and pipe import; it
 // lives here because every `server/commands/*.mjs` is loaded as a command.
 
 export const name = 'say';
 
 export const READ_ONLY = { t: 'error', text: 'read-only harness' };
+
+let slabSeq = 0;
 
 /** `owner.titleOf(sid)` when it is a function returning a non-empty string, else `sid` (a throw included). */
 export function title(owner, sid) {
@@ -25,7 +32,8 @@ export async function handle(cmd, ctx) {
   const owner = ctx.ownerOf(cmd.sid);
   if (typeof owner?.sendCommand !== 'function') return { ...READ_ONLY };
   const now = Date.now();
-  ctx.emit({ t: 'slab', sid: cmd.sid, id: 'user-' + now, role: 'user', text: cmd.text, ts: now });
+  slabSeq += 1;
+  ctx.emit({ t: 'slab', sid: cmd.sid, id: 'user-' + now + '-' + slabSeq, role: 'user', text: cmd.text, ts: now });
   await owner.sendCommand('prompt.submit', { session_id: cmd.sid, text: cmd.text });
   return undefined;
 }
