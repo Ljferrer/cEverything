@@ -62,12 +62,7 @@ export async function handle(cmd, ctx) {
   log(res.status);
   if (!res.ok) return fail(`transcribe failed: ${res.status}`);
 
-  let text = '';
-  try {
-    text = String((await res.json())?.text ?? '');
-  } catch {
-    text = '';
-  }
+  const text = String((await res.json().catch(() => null))?.text ?? '');
   if (!text.trim()) return fail('no speech');
 
   return ctx.commands.say.handle({ t: 'say', sid: cmd.sid, text }, ctx);
