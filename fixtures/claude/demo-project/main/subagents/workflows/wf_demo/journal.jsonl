@@ -1,0 +1,4 @@
+{"type":"launched"}
+{"type":"started","key":"v2:placeholder-a1","agentId":"a1","label":"research:fixtures","phase":"Research"}
+{"type":"started","key":"v2:placeholder-a2","agentId":"a2","label":"research:placeholder","phase":"Research"}
+{"type":"result","key":"v2:placeholder-a1","agentId":"a1","result":{"ok":true}}
