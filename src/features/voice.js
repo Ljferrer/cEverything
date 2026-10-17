@@ -79,12 +79,14 @@ export function install({ scene, camera, renderer, bus, net }) {
   });
 
   // Only the input source (controller or hand) that started the take ends it.
+  // An inactive recorder still has its `stop` event queued, and that event
+  // runs finish, so this listener never calls finish itself.
   bus.addEventListener('selectend', (e) => {
     if (!rec || rec.heldMs || e.detail?.controller !== rec.controller) return;
     rec.heldMs = Math.max(1, Math.round(performance.now() - rec.startedAt));
     release(rec);
-    if (rec.recorder.state !== 'inactive') rec.recorder.stop();
-    else finish(rec);
+    if (rec.finished) rec = null;
+    else if (rec.recorder.state !== 'inactive') rec.recorder.stop();
   });
 
   // Leaving XR sends no `selectend`, so drop any take still held.
@@ -93,6 +95,8 @@ export function install({ scene, camera, renderer, bus, net }) {
     if (!take || take.heldMs) return;
     rec = null;
     release(take);
+    if (take.finished) return;
+    take.finished = true;
     if (take.recorder.state !== 'inactive') take.recorder.stop();
     glyph.hide();
     talk('dropped', take.sid, 0);
@@ -106,13 +110,22 @@ export function install({ scene, camera, renderer, bus, net }) {
     stopRecognizer(take.recognizer);
   }
 
-  // Runs from the recorder's `stop` event, whatever stopped it: drop a short
-  // or empty take, else send it and open the error window (PIN-61). A stop
-  // with no `selectend` first (recorder error, ended mic track) has `heldMs`
-  // 0 and is dropped. A take that is no longer current was already dropped.
+  // Runs once per take from the recorder's `stop` event, whatever stopped it:
+  // drop a short or empty take, else send it and open the error window
+  // (PIN-61). A take dropped at `sessionend` is already finished.
   async function finish(take) {
-    if (!take || take !== rec) return;
-    release(take);
+    if (!take || take.finished) return;
+    take.finished = true;
+    if (!take.heldMs) {
+      // A stop with no `selectend` first (recorder error, ended mic track):
+      // drop the audio but keep the hold, so `rec`, the hold timer and
+      // `bus.talking` stay until the owning `selectend` or `sessionend`.
+      // Plan 6's fork and pipe read `bus.talking` on the release `select`.
+      stopRecognizer(take.recognizer);
+      glyph.hide();
+      talk('dropped', take.sid, 0);
+      return;
+    }
     const { sid, mime, heldMs: ms } = take;
     const blob = new Blob(take.chunks, { type: mime });
     if (ms < HOLD_MS || blob.size === 0) {
