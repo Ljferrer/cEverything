@@ -1,0 +1,7 @@
+node_modules/
+.env
+certs/
+*.log
+/test-results/
+/.playwright/
+.DS_Store
