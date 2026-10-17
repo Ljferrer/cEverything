@@ -149,7 +149,7 @@ Phase 1 only: Task 1 (scaffold, protocol, loaders, relay, synthetic source) in w
 
 ## Notes / conscious deviations
 
-- Operator pre-flight (not WAR tasks, done in the Hermes setup chat): pin Hermes to v0.22.2; pick a reasoning-capable model with `hermes model`; set `display.show_reasoning: true`, `display.tool_progress: true`, and `stt.provider` with a key; run `HERMES_DASHBOARD_SESSION_TOKEN=devtoken hermes serve --port 9119`; start `cloudflared tunnel --url http://localhost:5173`; open the tunnel URL on a phone.
+- Operator pre-flight (not WAR tasks, done in the Hermes setup chat): pin Hermes to v0.22.2; pick a reasoning-capable model with `hermes model`; set `display.show_reasoning: true`, `display.tool_progress: true`, and `stt.provider` with a key (Groq or OpenAI, or the ElevenLabs Creator credit every MOLTEN hacker redeems through the ElevenLabs Discord coupon channel); run `HERMES_DASHBOARD_SESSION_TOKEN=devtoken hermes serve --port 9119`; start `cloudflared tunnel --url http://localhost:5173`; open the tunnel URL on a phone.
 - The WAR run config is the balanced preset with five deep auditors and six rounds; with four build hours the operator should run `/war-room` and pick economy, or accept slower phases.
 - Plans 2–6 start only after this plan lands on master, each in its own `/war` session with its own working branch and `--landing master`; their file families are disjoint (see the roadmap's contention table), so parallel merges are clean.
 
