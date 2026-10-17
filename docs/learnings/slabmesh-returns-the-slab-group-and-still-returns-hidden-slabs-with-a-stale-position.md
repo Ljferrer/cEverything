@@ -15,6 +15,8 @@ metadata:
     - hidden slab
     - plan faithfulness
     - THREE.Mesh
+    - slabs.find slab.visible
+    - hidden-slab base fallback
   provenance: code-verified
   slug: slabmesh-returns-the-slab-group-and-still-returns-hidden-slabs-with-a-stale-position
   phase: phase-2
@@ -25,7 +27,7 @@ metadata:
     - plan-mismatch
   created: 2026-10-17
   originSessionId: 24fe07c2-1e38-4429-b5c7-e1be2b220156
-  modified: 2026-10-17T21:32:01.658Z
+  modified: 2026-10-17T22:12:07.463Z
 ---
 
 Seam note for plan 4 (pylon launch points) and plan 2.
@@ -42,6 +44,8 @@ The only test, `slabMesh returns the slab object for an id, null for an unknown 
 
 **Rule.** A consumer that anchors to a slab checks `m && m.visible`. Otherwise it falls back to the base (`userData.kind === 'base'`) or the beacon height. A pylon beam from a stale y would point at empty space.
 
-Locate-cue (verify still present before acting): `slabMesh` and `#layoutStack` (`if (slab.visible) slab.position.y = ...`) in `src/obelisk.js`. Read at the phase 2 integrated tip (the landed merge's second parent).
+**Applied in plan 4 (phase 1).** `src/features/pylons.js` does not call `slabMesh`. It reads `obelisk.slabs?.find((s) => s.slabId === frame.id)` and keeps the slab only if `slab && slab.visible`, otherwise it uses the obelisk base. The plan 4 slice (D55) named the lookup and the base fallback but no `visible` test, so the worker added it. The audit judged this inside the mechanism latitude, not a deviation, and a code comment now names `MAX_VISIBLE` and PIN-55. No test covers it (see [[pylons-js-static-imports-room-js-and-troika-so-only-code-trace-covers-its-wiring]]). A plan author who copies the D55 text alone gets the stale-position bug back.
+
+Locate-cue (verify still present before acting): `slabMesh` and `#layoutStack` (`if (slab.visible) slab.position.y = ...`) in `src/obelisk.js`. Read at the phase 2 integrated tip (the landed merge's second parent). The plan 4 read is `slabs?.find` and `slab.visible` in `src/features/pylons.js`, seen at tip 857b5ee, the second parent of landed merge e6ef0f2.
 
 Related: [[three-raycaster-ignores-visible-so-hidden-obelisk-parts-stay-pickable]], [[troika-slab-stack-needs-measured-heights-and-a-relayout-on-every-height-change]], [[obelisk-appenddelta-falls-back-to-the-newest-slab-of-the-role-for-an-unknown-id]].
