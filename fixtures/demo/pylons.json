@@ -1,0 +1,20 @@
+[
+  {
+    "kind": "browser",
+    "x": -2.5,
+    "z": -1,
+    "label": "web"
+  },
+  {
+    "kind": "terminal",
+    "x": 2.5,
+    "z": -1,
+    "label": "terminal"
+  },
+  {
+    "kind": "files",
+    "x": 0,
+    "z": -3.2,
+    "label": "codebase"
+  }
+]

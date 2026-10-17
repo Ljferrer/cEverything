@@ -23,6 +23,7 @@ npm start                       # fixture replay (default): http://localhost:878
 npm run start:tls               # same over self-signed HTTPS for a Quest on the same LAN (accept the browser warning)
 npm run start:hermes            # live: reads a local `hermes dashboard` (127.0.0.1:9119); writes via the Hermes API server (127.0.0.1:8642, needs HERMES_API_KEY)
 npm test && npm run smoke       # node tests + headless Chromium smoke test (desktop view)
+npm run verify                  # everything: tests + smoke + two-laptop sync test + XR-layer shape test (~4 min)
 ```
 
 Headsets need HTTPS. Use a tunnel with a real certificate (cloudflared named tunnel, ngrok static domain, Tailscale Serve) and open the printed URL / QR code in Quest Browser or visionOS Safari, then tap ENTER. See `docs/RUNBOOK.md`.
@@ -31,7 +32,7 @@ Flags: `--port 8787 --host 0.0.0.0 --tls --source fixture|hermes --fixture fixtu
 Env: `ASSEMBLYAI_API_KEY`, `HERMES_DASHBOARD`, `HERMES_API`, `HERMES_API_KEY`.
 Query flags on the page: `?mode=vr|ar`, `?hands=1`, `?scale=0.66`, `?debug=1`, `?judge=1`, `?name=Lukas`.
 
-Laptop keys: Enter send · Space hold to talk · F fork · P pipe · S summon · T top-down · C recenter height · V spectator (follow the headset) · R reset demo · D debug console · 1–5 demo cues · Esc close detail.
+Laptop keys: Enter send · Space hold to talk · F fork · P pipe · S summon · wheel / PageUp / PageDown / Home scroll a column · T top-down · C recenter height · V spectator (follow the headset) · R reset demo · D debug console · H hide panels · 1–5 demo cues · ? help · Esc close detail. Full map in `docs/RUNBOOK.md`.
 
 ## Repo map
 
@@ -39,7 +40,7 @@ Laptop keys: Enter send · Space hold to talk · F fork · P pipe · S summon ·
 |---|---|
 | `server/` | Node 22 static host + WebSocket hub, canonical state, fixture replayer, Hermes live adapter, speech-to-text relay |
 | `web/` | three.js 0.170 WebXR client (plain ES modules via import map; no bundler) |
-| `fixtures/demo/` | six recorded-style Hermes sessions that drive the demo without a live agent |
+| `fixtures/demo/` | seven recorded-style Hermes sessions (six plus a delegated child) that drive the demo without a live agent; `_authoring/` regenerates them |
 | `docs/` | `MOLTEN_STRATEGY.md` (the plan), `DESIGN.md`, `PROTOCOL.md`, `CONTEXT.md`, `RUNBOOK.md` |
 | `test/` | node:test suites and the Playwright smoke test |
 

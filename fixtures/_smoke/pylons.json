@@ -1,0 +1,5 @@
+[
+  { "kind": "browser", "x": -2.5, "z": -1.0, "label": "web" },
+  { "kind": "terminal", "x": 2.5, "z": -1.0, "label": "terminal" },
+  { "kind": "files", "x": 0, "z": -3.2, "label": "files" }
+]

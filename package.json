@@ -10,8 +10,10 @@
     "start": "node server/index.js",
     "start:tls": "node server/index.js --tls",
     "start:hermes": "node server/index.js --source hermes",
-    "test": "node --test test/",
-    "smoke": "node test/smoke.mjs"
+    "test": "node --test test/*.test.mjs",
+    "smoke": "node test/smoke.mjs",
+    "e2e": "node test/smoke.mjs && node test/two-clients.mjs && node test/xr-shape.mjs",
+    "verify": "npm test && npm run e2e"
   },
   "dependencies": {
     "three": "0.170.0",

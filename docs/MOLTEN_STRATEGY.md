@@ -160,7 +160,7 @@ Keep the honesty line in every walkthrough. Keep the headset on charge between j
 
 ## 14. Tonight's checklist (laptop)
 
-- [ ] `npm install && npm test && npm run smoke` pass; `npm start` shows the room on the laptop.
+- [ ] `npm install && npm run verify` passes (tests, smoke, two-laptop sync, XR shape); `npm start` shows the room on the laptop; read `docs/RUNBOOK.md` §7 for what is still untested on a device.
 - [ ] Named tunnel (cloudflared/ngrok/Tailscale) with a stable HTTPS URL; open it from your phone on cellular; keep the command in RUNBOOK.md.
 - [ ] Phone hotspot tested with the laptop; chargers, USB-C cable, Bluetooth keyboard (typing URLs in headsets), a printed URL card.
 - [ ] Immersive Web Emulator extension in Chrome; try pipe/fork/move with the emulated controllers.

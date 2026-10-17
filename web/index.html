@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>cEverything — every agent session is a column in your room</title>
+<meta name="description" content="AI Harness in VR: Hermes agent sessions as columns in a shared WebXR room; laptop and headset build together.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230b0f14'/%3E%3Crect x='7' y='6' width='18' height='4' rx='1' fill='%2338bdf8'/%3E%3Crect x='7' y='12' width='18' height='4' rx='1' fill='%23a78bfa'/%3E%3Crect x='7' y='18' width='18' height='4' rx='1' fill='%23f59e0b'/%3E%3Crect x='7' y='24' width='18' height='4' rx='1' fill='%23ffffff'/%3E%3C/svg%3E">
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
+</script>
+<style>
+  :root { --bg: #0b0f14; --panel: rgba(15, 23, 42, 0.86); --line: #1f2937; --text: #e5e7eb; --muted: #9ca3af; --cyan: #38bdf8; --amber: #f59e0b; --red: #ef4444; --green: #22c55e; --violet: #a78bfa; --blue: #3b82f6; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; overflow: hidden; }
+  canvas#gl { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: none; }
+  button, select, textarea { font: inherit; color: inherit; }
+  .btn { background: #111827; border: 1px solid #334155; border-radius: 6px; padding: 4px 10px; cursor: pointer; color: var(--text); }
+  .btn:hover { border-color: #64748b; background: #1f2937; }
+  .btn.primary { background: #0e7490; border-color: #06b6d4; }
+  .btn.ok { background: #14532d; border-color: var(--green); } .btn.bad { background: #7f1d1d; border-color: var(--red); } .btn.cue { padding: 2px 8px; font-size: 12px; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .badge { display: inline-block; padding: 3px 9px; border-radius: 999px; background: #1f2937; border: 1px solid #334155; font-size: 12px; letter-spacing: .02em; }
+  .badge.ok { border-color: var(--green); color: #bbf7d0; } .badge.warn { border-color: var(--amber); color: #fde68a; } .badge.bad { border-color: var(--red); color: #fecaca; }
+  .badge.fixture { border-color: var(--amber); color: #fde68a; font-weight: 700; } .badge.live { border-color: var(--green); color: #bbf7d0; font-weight: 700; } .badge.flag { border-color: var(--blue); color: #bfdbfe; }
+
+  /* landing overlay */
+  #landing { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; background: radial-gradient(ellipse at 50% 40%, #111827 0%, #0b0f14 70%); transition: opacity .4s; }
+  #landing.hidden { opacity: 0; pointer-events: none; }
+  #landing .card { width: min(92vw, 720px); display: grid; grid-template-columns: 1fr auto; gap: 20px 28px; align-items: center; }
+  #landing h1 { margin: 0 0 6px; font-size: 34px; letter-spacing: -.01em; } #landing h1 small { color: var(--muted); font-size: 15px; font-weight: 400; display: block; margin-top: 6px; }
+  #landing p { color: var(--muted); margin: 6px 0; }
+  #enter-xr { font-size: 32px; font-weight: 800; padding: 26px 48px; border-radius: 16px; background: linear-gradient(135deg, #0e7490, #1d4ed8); border: 2px solid var(--cyan); color: white; cursor: pointer; width: 100%; letter-spacing: .04em; box-shadow: 0 0 40px rgba(56,189,248,.25); }
+  #enter-xr:hover { filter: brightness(1.1); }
+  #enter-desktop { font-size: 18px; padding: 14px 26px; border-radius: 12px; width: 100%; }
+  body.desktop-only #enter-desktop { font-size: 26px; font-weight: 700; padding: 22px 40px; background: linear-gradient(135deg, #0e7490, #1d4ed8); border-color: var(--cyan); }
+  #landing .buttons { display: grid; gap: 12px; }
+  #landing .badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  #landing .qr { text-align: center; } #landing .qr canvas { width: 180px; height: 180px; image-rendering: pixelated; border-radius: 8px; background: white; padding: 0; }
+  #landing .qr div { font-size: 11px; color: var(--muted); max-width: 200px; word-break: break-all; margin-top: 6px; }
+  #landing-nogl { color: #fecaca; background: #7f1d1d; padding: 8px 12px; border-radius: 8px; }
+  @media (max-width: 640px) { #landing .card { grid-template-columns: 1fr; } #landing .qr { display: none; } }
+
+  /* HUD */
+  #hud { position: fixed; inset: 0; pointer-events: none; z-index: 10; display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: 280px 1fr 360px; grid-template-areas: "top top top" "left . right" "stats . right"; }
+  body:not(.started) #hud { visibility: hidden; }
+  #hud.panels-hidden #hud-left, #hud.panels-hidden #hud-right { display: none; }
+  #hud > * { pointer-events: auto; }
+  #hud-top { grid-area: top; display: flex; gap: 8px; align-items: center; padding: 8px 10px; background: linear-gradient(to bottom, rgba(11,15,20,.95), rgba(11,15,20,0)); }
+  #hud-top .spacer { flex: 1; } #hud-fixture { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; } #hud-fixture .cues { display: inline-flex; gap: 4px; margin-left: 6px; }
+  #hud-left { grid-area: left; margin: 0 0 8px 8px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: auto; display: flex; flex-direction: column; min-height: 0; }
+  #hud-right { grid-area: right; margin: 0 8px 8px 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; display: flex; flex-direction: column; min-height: 0; }
+  .panel-title { padding: 8px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+  #hud-focus { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--text); } #hud-focus .model, #hud-focus .status { color: var(--muted); font-size: 12px; }
+  #hud-sessions { overflow: auto; padding: 4px; }
+  .sess { padding: 6px 8px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; margin-bottom: 2px; }
+  .sess:hover { background: #111827; } .sess.focused { border-color: var(--cyan); background: #0c2230; } .sess.waiting { border-color: var(--red); }
+  .sess .row1 { display: flex; gap: 6px; align-items: center; } .sess .title { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .sess .model { color: var(--muted); font-size: 11px; }
+  .sess .row2 { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 16px; }
+  .sess .row3 { display: flex; justify-content: space-between; align-items: center; padding-left: 16px; font-size: 11px; color: var(--muted); }
+  .sess .hist i { display: inline-block; width: 8px; height: 8px; margin-right: 2px; border-radius: 2px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; } .dot.thinking, .dot.responding, .dot.tool { animation: pulse 1.2s infinite; } .dot.waiting_on_you { animation: pulse .6s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  .empty { color: var(--muted); padding: 10px; }
+  #hud-approvals:empty { display: none; }
+  .approval { margin: 8px; padding: 10px; border: 1px solid var(--red); border-radius: 10px; background: #2a0b0b; }
+  .approval-title { font-weight: 700; color: #fecaca; } .approval-text { margin: 6px 0; font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: pre-wrap; } .approval-actions { display: flex; gap: 6px; }
+  #hud-transcript { flex: 1; overflow: auto; padding: 6px 8px; min-height: 0; }
+  .msg { border-left: 3px solid; padding: 4px 8px; margin: 6px 0; border-radius: 4px; background: rgba(255,255,255,.02); cursor: pointer; } .msg.selected { background: rgba(56,189,248,.12); outline: 1px solid var(--cyan); }
+  .msg .head { display: flex; gap: 8px; align-items: center; font-size: 11px; color: var(--muted); } .msg .head .time { margin-left: auto; } .msg .glyph { font-weight: 700; }
+  .msg .chip { padding: 0 6px; border-radius: 999px; color: #0b0f14; font-weight: 700; font-size: 10px; } .msg .via { color: var(--blue); }
+  .msg .text { white-space: pre-wrap; word-break: break-word; } .msg .text.thinking { color: #c4b5fd; font-style: italic; opacity: .85; } .msg .summary { font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+  .msg pre { margin: 4px 0 0; font-size: 11.5px; white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow: auto; background: #0a0f16; padding: 6px; border-radius: 6px; }
+  .msg pre.diff .add { color: #86efac; } .msg pre.diff .del { color: #fca5a5; } .msg pre.diff .hunk { color: var(--cyan); } .msg pre.diff .ctx { color: #9ca3af; }
+  .msg .cursor { color: var(--cyan); animation: pulse .8s infinite; } .earlier { color: var(--muted); font-size: 12px; text-align: center; padding: 4px; }
+  #hud-voicebar { margin: 0 8px; padding: 6px 10px; border-radius: 8px; background: #1e293b; border: 1px dashed var(--muted); font-style: italic; } #hud-voicebar.final { border-style: solid; border-color: var(--cyan); font-style: normal; }
+  #hud-compose { display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--line); } #hud-text { flex: 1; resize: none; background: #0a0f16; border: 1px solid #334155; border-radius: 8px; padding: 6px 8px; font-family: ui-monospace, Menlo, monospace; font-size: 12.5px; }
+  #hud-stats { grid-area: stats; padding: 4px 10px; color: var(--muted); font-size: 11px; font-family: ui-monospace, Menlo, monospace; }
+  #hud-toasts { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; }
+  .toast { background: #1f2937; border: 1px solid #334155; padding: 6px 12px; border-radius: 999px; font-size: 13px; transition: opacity .4s; } .toast.ok { border-color: var(--green); } .toast.warn { border-color: var(--amber); } .toast.bad { border-color: var(--red); } .toast.out { opacity: 0; }
+  #hud-help { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: grid; place-items: center; z-index: 60; } #hud-help[hidden] { display: none; }
+  .help-card { background: #0f172a; border: 1px solid #334155; border-radius: 14px; padding: 18px 22px; max-width: 640px; max-height: 90vh; overflow: auto; } .help-card h2 { margin: 0 0 10px; } .help-card table { border-collapse: collapse; } .help-card td { padding: 3px 10px 3px 0; vertical-align: top; } kbd { background: #1f2937; border: 1px solid #475569; border-radius: 4px; padding: 1px 6px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; white-space: nowrap; }
+  body.no-webgl #hud { grid-template-columns: 1fr 1fr; grid-template-areas: "top top" "left right" "stats right"; }
+  @media (max-width: 900px) { #hud { grid-template-columns: 1fr; grid-template-rows: auto auto 1fr auto; grid-template-areas: "top" "left" "right" "stats"; } #hud-left { max-height: 30vh; margin: 0 8px; } }
+</style>
+</head>
+<body>
+  <div id="landing">
+    <div class="card">
+      <div>
+        <h1>cEverything<small>Every AI-agent session you have open stands as a column in your room. Walk up to read it, look at it and speak to steer it, drag a message onto another column to connect them — while your laptop teammate types, approves and arranges in the same room.</small></h1>
+        <p id="landing-nogl" hidden></p>
+        <div class="buttons">
+          <button id="enter-xr" hidden>ENTER XR</button>
+          <button id="enter-desktop" class="btn">Open on laptop</button>
+        </div>
+        <div class="badges"><span id="badge-conn" class="badge warn">connecting…</span><span id="badge-mic" class="badge warn">mic: …</span></div>
+        <p>Headsets: open this URL in Quest Browser or visionOS Safari (HTTPS) and tap ENTER. Laptop: Open on laptop, then press <kbd>?</kbd> for the keys.</p>
+      </div>
+      <div class="qr"><canvas id="qr" width="256" height="256"></canvas><div id="landing-url"></div></div>
+    </div>
+  </div>
+  <div id="hud" hidden></div>
+  <script type="module">
+    // show the HUD container once main.js mounts it; keep a crash message visible if the module fails to load
+    document.getElementById('hud').hidden = false;
+    window.addEventListener('error', (e) => { const n = document.getElementById('landing-nogl'); if (n && e.message && /import|module|Failed to fetch/i.test(e.message)) { n.hidden = false; n.textContent = `script error: ${e.message}`; } });
+  </script>
+  <script type="module" src="/main.js"></script>
+</body>
+</html>
