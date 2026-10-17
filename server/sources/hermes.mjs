@@ -134,6 +134,31 @@ function rejectPending(reason) {
 }
 
 /**
+ * Drop the current socket, if any: reject its pending requests, detach its
+ * listeners, and terminate it. The detached close listener never fires, so
+ * `onClose` and its retry do not run for a socket dropped here.
+ */
+function dropSocket(reason) {
+  rejectPending(reason);
+  if (!ws) return;
+  const sock = ws;
+  ws = null;
+  sock.removeAllListeners();
+  sock.on('error', () => {});
+  sock.terminate();
+}
+
+/**
+ * Emit an error state for a sid and record it in the session table, so the
+ * next upsert in `attach` sees a status change and emits the recovered state.
+ */
+function errorState(sid) {
+  const prev = sessions.get(sid);
+  if (prev) sessions.set(sid, { ...prev, status: 'error' });
+  emit({ t: 'state', sid, status: 'error' });
+}
+
+/**
  * Send one JSON-RPC request to Hermes and resolve to its result (PIN-34). A
  * `session.create` or `session.branch` reply attaches the new session; a
  * `prompt.submit` is remembered so its echoed user message emits no slab.
@@ -146,9 +171,7 @@ export async function sendCommand(method, params = {}) {
   try {
     result = await request(method, params);
   } catch (err) {
-    if (typeof params.session_id === 'string' && sessions.has(params.session_id)) {
-      emit({ t: 'state', sid: params.session_id, status: 'error' });
-    }
+    if (typeof params.session_id === 'string' && sessions.has(params.session_id)) errorState(params.session_id);
     throw err;
   }
   if ((method === 'session.create' || method === 'session.branch') && typeof result?.session_id === 'string') {
@@ -254,13 +277,12 @@ function attach(info) {
         await request('session.resume', { session_id: sid, omit_messages: false, close_on_disconnect: false });
         resumed.add(sid);
       } catch {
-        if (known) emit({ t: 'state', sid, status: 'error' });
-        else {
+        if (!known) {
           const frame = sessionFrame({ ...info, status: 'error' });
           sessions.set(sid, frame);
           emit(frame);
-          emit({ t: 'state', sid, status: 'error' });
         }
+        errorState(sid);
         return;
       }
     }
@@ -365,7 +387,7 @@ function onEvent(name, p) {
       attach(p).catch(() => {});
       return;
     case 'error':
-      emit({ t: 'state', sid, status: 'error' });
+      errorState(sid);
       return;
     case 'message.start': {
       if (p.role === 'user') return;
@@ -463,12 +485,14 @@ function connect(env) {
   });
 }
 
-/** Handshake on a ready socket: capabilities, then list and attach. */
+/** Handshake on a ready socket: capabilities, then list and attach. Close runs `onClose` only while this socket is still `ws`. */
 async function handshake(sock) {
   ws = sock;
   sock.on('message', onMessage);
   sock.on('error', () => {});
-  sock.on('close', onClose);
+  sock.on('close', () => {
+    if (sock === ws) onClose();
+  });
   try {
     await request('client.capabilities', { server_requests: true });
   } catch {
@@ -496,6 +520,8 @@ function scheduleRetry() {
       if (stopped) return sock.terminate();
       await handshake(sock);
     } catch {
+      // A handshake that failed without a close leaves its socket open: drop it so the next retry owns the only live socket.
+      dropSocket('hermes handshake failed');
       if (!stopped) scheduleRetry();
     }
   }, retryMs(currentEnv));
@@ -527,20 +553,15 @@ export async function stop() {
   stopped = true;
   clearTimeout(retryTimer);
   retryTimer = null;
-  rejectPending('hermes source stopped');
-  if (ws) {
-    const sock = ws;
-    ws = null;
-    sock.removeAllListeners();
-    sock.on('error', () => {});
-    sock.terminate();
-  }
+  dropSocket('hermes source stopped');
 }
 
 /**
- * Connect to the Hermes gateway, attach every active session, seed `--seed N`
- * sessions, and resolve to `{stop}`. Rejects when the host does not answer
- * within the connect timeout so the relay falls back to synthetic (PIN-31).
+ * Connect to the Hermes gateway, attach every active session, and resolve to
+ * `{stop}`; `--seed N` then seeds N sessions in the background, off the
+ * resolve path, so a slow `prompt.submit` never delays the relay's listen.
+ * Rejects when the host does not answer within the connect timeout so the
+ * relay falls back to synthetic (PIN-31).
  * The relay's own `sendCommand` argument (a client-command router) is not
  * used: command modules reach this source through the exported `sendCommand`.
  */
@@ -558,12 +579,6 @@ export async function start({ emit: emitFn, argv = process.argv, env = process.e
   }
   attachedOnce = true;
   const n = seedCount(argv);
-  if (n > 0) {
-    try {
-      await seed(n);
-    } catch (err) {
-      console.error('[hermes] seed failed:', err.message);
-    }
-  }
+  if (n > 0) seed(n).catch((err) => console.error('[hermes] seed failed:', err.message));
   return { stop };
 }
