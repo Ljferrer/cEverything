@@ -1,7 +1,9 @@
 // The Obelisks relay: the only thing headsets talk to (PIN-9). It loads every
 // server/sources/*.mjs and server/commands/*.mjs, starts the named sources,
 // re-broadcasts their frames to every client, caches the last 200 slabs per
-// session, and routes editor commands to command modules (PIN-19, PIN-22, PIN-23).
+// session beside the last `session` and `state` frame, replays that cache per
+// sid (session, slabs, state) to a late client (PIN-24), and routes editor
+// commands to command modules (PIN-19, PIN-22, PIN-23).
 //
 // A source module exports `start({emit, sendCommand})` and may export `stop()`.
 // A writable source also exports `sendCommand(method, params)`, `titleOf(sid)`,
@@ -80,6 +82,8 @@ export async function startRelay({
     sessions: new Map(),
     /** sid → last SLAB_CACHE `slab` frames, in arrival order. Each entry is the relay's own copy: a `delta` appends to it, never to the source's object. */
     slabs: new Map(),
+    /** sid → last `state` frame, replayed after the slabs so a late client sees the current status. */
+    states: new Map(),
     /** sid → name of the source that announced the session. */
     owners: new Map(),
     /** name → started source module. */
@@ -104,6 +108,7 @@ export async function startRelay({
       relay.sessions.set(frame.sid, frame);
       if (owner) relay.owners.set(frame.sid, owner);
     } else if (frame.t === 'state') {
+      relay.states.set(frame.sid, frame);
       const s = relay.sessions.get(frame.sid);
       if (s) relay.sessions.set(frame.sid, { ...s, status: frame.status });
     } else if (frame.t === 'slab') {
@@ -133,6 +138,18 @@ export async function startRelay({
     if (record) appendFile(record, JSON.stringify(frame) + '\n').catch((e) => log('record failed:', e.message));
     for (const c of relay.clients) sendTo(c, frame);
     return true;
+  }
+
+  /** Replay the cache to a late client, per sid: `session`, its slabs in order, then its last `state` (PIN-24). Sids with no `session` frame follow. */
+  function backfill(client) {
+    const sids = new Set([...relay.sessions.keys(), ...relay.slabs.keys(), ...relay.states.keys()]);
+    for (const sid of sids) {
+      const session = relay.sessions.get(sid);
+      if (session) sendTo(client, session);
+      for (const s of relay.slabs.get(sid) ?? []) sendTo(client, s);
+      const state = relay.states.get(sid);
+      if (state) sendTo(client, state);
+    }
   }
 
   /** Change live/replay/synthetic and tell every client (each with its own canEdit). */
@@ -202,8 +219,7 @@ export async function startRelay({
     const client = { ws, canEdit: key === editKey };
     relay.clients.add(client);
     sendTo(client, modeFrame(client));
-    for (const s of relay.sessions.values()) sendTo(client, s);
-    for (const list of relay.slabs.values()) for (const s of list) sendTo(client, s);
+    backfill(client);
     ws.on('message', (data) => {
       let cmd;
       try {
