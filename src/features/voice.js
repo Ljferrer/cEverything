@@ -22,7 +22,7 @@ const GLYPH_TEXT = '● REC';
 let stream = null;
 let streamRequested = false;
 
-export function install({ scene, camera, bus, net }) {
+export function install({ scene, camera, renderer, bus, net }) {
   installMic();
 
   // Subscribe synchronously: the relay's single `mode` frame can land right
@@ -50,20 +50,22 @@ export function install({ scene, camera, bus, net }) {
     const chunks = [];
     const chosen = pickMime();
     let recorder;
+    let take = null;
     try {
       recorder = new MediaRecorder(stream, chosen ? { mimeType: chosen } : undefined);
       recorder.addEventListener('dataavailable', (ev) => {
         if (ev.data && ev.data.size > 0) chunks.push(ev.data);
       });
-      recorder.addEventListener('stop', () => finish());
+      recorder.addEventListener('stop', () => finish(take));
       recorder.start();
     } catch (err) {
       talk('error', sid);
       console.log('voice: recorder failed', err?.message ?? err);
       return;
     }
-    rec = {
+    take = rec = {
       sid,
+      controller: e.detail?.controller,
       recorder,
       chunks,
       mime: recorder.mimeType || chosen || '',
@@ -76,21 +78,41 @@ export function install({ scene, camera, bus, net }) {
     talk('start', sid);
   });
 
-  bus.addEventListener('selectend', () => {
-    if (!rec || rec.heldMs) return;
-    clearTimeout(rec.holdTimer);
-    bus.talking = null;
+  // Only the input source (controller or hand) that started the take ends it.
+  bus.addEventListener('selectend', (e) => {
+    if (!rec || rec.heldMs || e.detail?.controller !== rec.controller) return;
     rec.heldMs = Math.max(1, Math.round(performance.now() - rec.startedAt));
-    stopRecognizer(rec.recognizer);
+    release(rec);
     if (rec.recorder.state !== 'inactive') rec.recorder.stop();
-    else finish();
+    else finish(rec);
   });
 
-  // Runs from the recorder's `stop` event: drop a short or empty take, else
-  // send it and open the error window (PIN-61).
-  async function finish() {
+  // Leaving XR sends no `selectend`, so drop any take still held.
+  renderer.xr.addEventListener('sessionend', () => {
     const take = rec;
-    if (!take) return;
+    if (!take || take.heldMs) return;
+    rec = null;
+    release(take);
+    if (take.recorder.state !== 'inactive') take.recorder.stop();
+    glyph.hide();
+    talk('dropped', take.sid, 0);
+  });
+
+  // Every end of a take passes here: cancel the pending hold flag, clear
+  // `bus.talking`, stop the recognizer. Safe to run twice.
+  function release(take) {
+    clearTimeout(take.holdTimer);
+    bus.talking = null;
+    stopRecognizer(take.recognizer);
+  }
+
+  // Runs from the recorder's `stop` event, whatever stopped it: drop a short
+  // or empty take, else send it and open the error window (PIN-61). A stop
+  // with no `selectend` first (recorder error, ended mic track) has `heldMs`
+  // 0 and is dropped. A take that is no longer current was already dropped.
+  async function finish(take) {
+    if (!take || take !== rec) return;
+    release(take);
     const { sid, mime, heldMs: ms } = take;
     const blob = new Blob(take.chunks, { type: mime });
     if (ms < HOLD_MS || blob.size === 0) {
