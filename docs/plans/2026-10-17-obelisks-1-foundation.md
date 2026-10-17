@@ -104,13 +104,13 @@ Harness source (one module per agent harness), obelisk (one session or agent), c
   7. `?mode=laptop` shows the room with an orbit camera and a text box that sends `say` for the selected obelisk, on a laptop, and installs on a phone whose browser lacks `immersive-vr` support (judged at a phone viewport on localhost; the share link is backstop row 3) · HARD at audit_sha (observable + judge seat).
   8. An in-scene label owned by `xr.js` (so it shows in the headset; `laptop.js` mirrors it in the DOM) reads `SYNTHETIC` or `REPLAY` whenever the relay is not live · check: `npm install --no-audit --no-fund >/dev/null && node --test 'server/*.test.mjs'` proves the `mode` event; the label is judged at audit_sha.
   9. A client on the bare link receives `canEdit:false` and its `say` is refused with `view-only link`; a client with `?key=edit` receives `canEdit:true`; an editor's command reaches a stub command module through `handle(cmd, ctx)` with `ctx.commands` and `ctx.ownerOf` present; a started source named `replay` yields `mode:'replay'`; unknown argv flags do not stop the relay · check: `npm install --no-audit --no-fund >/dev/null && node --test 'server/*.test.mjs'`.
-  10. No client file contains a session token or API key · check: `grep -rniE 'session_?token|api_?key|devtoken' src/ shared/ index.html ; test $? -eq 1 && echo CLIENT_CLEAN`.
+  10. No client file contains a session token or API key · check: `! grep -rniE 'session_?token|api_?key|devtoken' src/ shared/ index.html && echo CLIENT_CLEAN`.
   11. The laptop page shows a QR code whose decoded text equals the view link · HARD at audit_sha (observable + judge seat).
   12. Every seam plans 2–6 need exists with the documented export names · check: `npm install --no-audit --no-fund >/dev/null && node --input-type=module -e "const p=await import('./shared/protocol.mjs');const i=await import('./src/input.js');const c=await import('./src/colors.js');const l=await import('./src/lod.js');const ok=p.isServerEvent&&p.isClientCommand&&p.EVENTS&&i.hitToEvent&&c.colorFor&&c.stateColor&&l.lod;if(!ok)process.exit(1);console.log('SEAMS_OK')" && grep -q 'export function getObelisk' src/features/room.js && grep -q 'export function allObelisks' src/features/room.js && grep -q 'selectedSlab' src/bus.js && grep -q 'setBeacon' src/obelisk.js && grep -q 'ownerOf' server/relay.mjs && echo SEAMS_OK`.
 
 ## Build order (for /war)
 
-Phase 1 only: Task 1 (scaffold, protocol, loaders, relay, synthetic source) in wave 1; Tasks 2, 3 and 4 in wave 2. No release phase.
+Phase 1: Task 1 (scaffold, protocol, loaders, relay, synthetic source) in wave 1; Tasks 2, 3 and 4 in wave 2. Phase 2: Task 5 alone (relay seams plans 2–6 need, added after their red-team batches). No release phase.
 
 ## Phase 1 — Foundation (11:45 AM to 2 PM)
 
@@ -148,6 +148,19 @@ Phase 1 only: Task 1 (scaffold, protocol, loaders, relay, synthetic source) in w
 - requiresTest: true
 - requiresPackaging: false
 - deps: [1]
+- target repo: superproject
+
+## Phase 2 — Relay seam hardening for plans 2–6 (after phase 1 lands)
+
+Added after the plan 2 and plan 3 red-team batches named three relay seams every later plan hits. Phase 2 edits only Task 1's files and changes no pin.
+
+### Task 5: Relay env port, loader export checks, seam tests, frame hook, fixture pylons
+- Files: `server/relay.mjs`, `server/relay.test.mjs`, `shared/protocol.test.mjs`, `src/main.js`, `src/obelisk.js`, `fixtures/synthetic.jsonl`
+- Plan slice: `server/relay.mjs` listens on `--port`, else `process.env.OBELISKS_PORT`, else 8787, so later plans' tests spawn relays on free ports in parallel; `loadModules` keeps its `*.test.mjs` skip and missing-dir tolerance, and the relay additionally logs and skips a source module without `start` and a command module without both `name` and `handle` at load time, so a stray helper file beside the modules never breaks startup or registers a phantom command. The audience rule stays as built and is now stated: `emit(frame)` from a source or command broadcasts to every client and to `--record`; a command's resolved return frame goes only to the issuing client; commands return error frames and never emit them; `relay.slabs` is a `Map<sid, slab[]>` oldest first (plan 2's pipe reads it). Tests added: a stub `x.test.mjs` and a stub `helper.mjs` (no exports) in a temp sources dir are not loaded and the relay still starts; a command module without `name`/`handle` is skipped; `OBELISKS_PORT=0` yields a free port; `isServerEvent` accepts a chat `session` frame with no `parent`/`phase` keys and a `tool` start frame with no `args`/`summary`/`diff` keys, and rejects a `session` frame whose `parent` is a number. Existing tests stay green. `src/main.js` keeps emitting `frame {dt, camera, renderer}` on `bus` and additionally passes `onFrame(cb)` in the install ctx: each registered `cb(dt, now)` runs inside `renderer.setAnimationLoop` on every render, immersive sessions included (a bare Object3D's `onBeforeRender` never fires there). `src/obelisk.js` adds `slabMesh(slabId)` returning the slab's mesh or null, beside `setState` and `setBeacon`; `getObelisk(sid)` keeps returning the obelisk `THREE.Group`. `fixtures/synthetic.jsonl` carries one start/complete tool pair per pylon class: `web_search` (browser), `write_file` with `args.path` and a unified-diff string in `diff` on complete (filesystem), `terminal` (shell), each start paired with a role-`tool` slab of the same id emitted before the start, plus one `tool` frame for an undeclared `sid` and one `Agent` start; the End state 2 counts (three sessions, one `thinking` slab, one `tool` event) still hold.
+- Done when: `npm install --no-audit --no-fund >/dev/null && npm test`
+- requiresTest: true
+- requiresPackaging: false
+- deps: []
 - target repo: superproject
 
 ## Deferred validations (backstops)
