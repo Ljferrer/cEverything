@@ -61,14 +61,9 @@ function makePylon(name) {
   return { group: g, box, glowUntil: -Infinity };
 }
 
-/** The base mesh under an obelisk (userData.kind === 'base'), or the obelisk itself. */
+/** The base mesh under an obelisk (`Obelisk#base`), or the obelisk itself. */
 function baseOf(obelisk) {
-  if (obelisk.base?.userData?.kind === 'base') return obelisk.base;
-  let found = null;
-  obelisk.traverse((o) => {
-    if (!found && o.userData?.kind === 'base') found = o;
-  });
-  return found ?? obelisk;
+  return obelisk.base ?? obelisk;
 }
 
 export function install({ scene, bus }) {
