@@ -1,0 +1,24 @@
+{
+  "name": "obelisks",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Obelisks: a VR room of agent sessions (one WebXR bundle, one Node relay)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "relay": "node server/relay.mjs",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "three": "0.186.1",
+    "troika-three-text": "^0.52.5",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.4"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
