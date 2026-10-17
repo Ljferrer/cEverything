@@ -339,3 +339,33 @@ test('the CLI still starts with flags it does not own', async () => {
     child.kill();
   }
 });
+
+test('a late client gets session, then slabs in order, then state, per sid (PIN-24 backfill)', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'obelisks-late-'));
+  await mkdir(path.join(dir, 'sources'));
+  await writeFile(
+    path.join(dir, 'sources', 'hermes.mjs'),
+    `export async function start({ emit }) {\n` +
+      `  emit({ t: 'session', sid: 'L', harness: 'hermes', kind: 'chat', title: 'late', status: 'idle', parent: null, phase: null });\n` +
+      `  emit({ t: 'slab', sid: 'L', id: 'a', role: 'user', text: 'first', ts: 1 });\n` +
+      `  emit({ t: 'slab', sid: 'L', id: 'b', role: 'assistant', text: 'second', ts: 2 });\n` +
+      `  emit({ t: 'state', sid: 'L', status: 'working' });\n` +
+      `  emit({ t: 'state', sid: 'L', status: 'waiting' });\n` +
+      `}\n`,
+  );
+  const r = await relay({ sources: 'hermes', sourcesDir: path.join(dir, 'sources') });
+  assert.deepEqual(r.states.get('L'), { t: 'state', sid: 'L', status: 'waiting' }, 'the last state frame is cached per sid');
+  assert.equal(r.sessions.get('L').sid, 'L');
+  const late = connect(r);
+  const frames = await late.until((f) => f.some((x) => x.t === 'state' && x.sid === 'L'));
+  assert.equal(frames[0].t, 'mode', 'the composed mode frame comes first');
+  const forL = frames.filter((x) => x.sid === 'L');
+  assert.deepEqual(
+    forL.map((x) => x.t),
+    ['session', 'slab', 'slab', 'state'],
+    'session before any slab, slabs in arrival order, state last',
+  );
+  assert.deepEqual(forL.slice(1, 3).map((x) => x.id), ['a', 'b']);
+  assert.equal(forL.at(-1).status, 'waiting', 'only the last state is replayed');
+  late.ws.close();
+});
