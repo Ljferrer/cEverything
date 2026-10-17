@@ -353,6 +353,11 @@ test('ES8 a transcript and an agent file created after start join on the next re
   await s.until((f) => f.some((x) => x.t === 'slab' && x.sid === 'sid2'), 2000, 'late chat slab');
   // Two more poll ticks: a tick that saw a half-seeded late file would have
   // sent its frames before the `session` and the seed would repeat them.
+  // These arms go red only when a tick lands inside track()'s read window.
+  // That window is under 1 ms for these late files and about 70 ms for a
+  // 50,000-line transcript (measured 2026-10-17), so no fixture size makes
+  // the proof deterministic against a pollMs tick; claude.mjs closes the race
+  // by construction (files.set after the seed), and the arms stay as a guard.
   await sleep(500);
   for (const sid of ['sid2', 'a3']) {
     const idx = (pred) => s.frames.findIndex((x) => x.sid === sid && pred(x));
