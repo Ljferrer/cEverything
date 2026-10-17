@@ -1,7 +1,9 @@
 // One session = one obelisk (PIN-1): a wireframe base box, a title label, and
 // a vertical stack of message slabs, newest on top. Each frame `update(camera)`
 // picks a LOD band per slab (PIN-13) and shows full text, the mid summary, or a
-// role-colored bar. `setState` and `setBeacon` are the plan 6 seams.
+// role-colored bar. Slabs stack by measured height (src/stack.js): troika lays
+// text out asynchronously, so every `sync` re-runs the layout when it completes.
+// `setState` and `setBeacon` are the plan 6 seams.
 //
 // Pick targets (PIN-22): every slab mesh carries userData {sid, slabId} and the
 // base carries userData {sid, kind:'base'}.
@@ -9,11 +11,11 @@ import * as THREE from 'three';
 import { Text } from 'troika-three-text';
 import { lod, midSummary } from './lod.js';
 import { colorFor, stateColor } from './colors.js';
+import { BAR_HEIGHT, slabHeight, stackLayout } from './stack.js';
 
 export const BASE_SIZE = 0.5;
 export const BASE_HEIGHT = 0.1;
 export const SLAB_WIDTH = 0.6;
-export const SLAB_PITCH = 0.12;
 export const STACK_BOTTOM = BASE_HEIGHT + 0.16; // room above the base for the title
 export const MAX_VISIBLE = 40;
 export const MAX_KEPT = 200; // older slabs are disposed; the relay caches the same count
@@ -21,7 +23,7 @@ export const MAX_KEPT = 200; // older slabs are disposed; the relay caches the s
 const _slabPos = new THREE.Vector3();
 const _camPos = new THREE.Vector3();
 
-function makeText(text, fontSize, color, anchorY = 'bottom') {
+function makeText(text, fontSize, color, onSync) {
   const t = new Text();
   t.text = text;
   t.fontSize = fontSize;
@@ -29,8 +31,8 @@ function makeText(text, fontSize, color, anchorY = 'bottom') {
   t.sdfGlyphSize = 64;
   t.maxWidth = SLAB_WIDTH;
   t.anchorX = 'center';
-  t.anchorY = anchorY;
-  t.sync();
+  t.anchorY = 'bottom';
+  t.sync(onSync);
   return t;
 }
 
@@ -108,15 +110,15 @@ export class Obelisk extends THREE.Group {
     slab.band = null;
     slab.userData = { sid: this.sid, slabId: id };
 
-    slab.text = makeText(text, 0.04, colorFor(role));
+    slab.text = makeText(text, 0.04, colorFor(role), () => this.#layoutStack());
     slab.text.userData = { sid: this.sid, slabId: id };
     slab.add(slab.text);
 
     slab.bar = new THREE.Mesh(
-      new THREE.PlaneGeometry(SLAB_WIDTH, 0.05),
+      new THREE.PlaneGeometry(SLAB_WIDTH, BAR_HEIGHT),
       new THREE.MeshBasicMaterial({ wireframe: true, color: colorFor(role) }),
     );
-    slab.bar.position.y = 0.025;
+    slab.bar.position.y = BAR_HEIGHT / 2;
     slab.bar.visible = false;
     slab.bar.userData = { sid: this.sid, slabId: id };
     slab.add(slab.bar);
@@ -174,6 +176,7 @@ export class Obelisk extends THREE.Group {
     if (band === 'far') {
       slab.text.visible = false;
       slab.bar.visible = true;
+      this.#layoutStack(); // the bar is shorter than the text it replaces
       return;
     }
     slab.bar.visible = false;
@@ -181,21 +184,25 @@ export class Obelisk extends THREE.Group {
     const want = band === 'near' ? slab.full : midSummary(slab.full, this.toolCount);
     if (slab.text.text !== want) {
       slab.text.text = want;
-      slab.text.sync();
+      slab.text.sync(() => this.#layoutStack());
     }
   }
 
-  // Oldest at the bottom, newest on top; only the last MAX_VISIBLE show, and
-  // slabs past MAX_KEPT are disposed.
+  // Oldest at the bottom, newest on top, each slab's bottom at the summed
+  // measured heights of the slabs below it; only the last MAX_VISIBLE show,
+  // slabs past MAX_KEPT are disposed, and the beacon rides above the top.
   #layoutStack() {
     while (this.slabs.length > MAX_KEPT) this.#drop(this.slabs.shift());
     const firstVisible = Math.max(0, this.slabs.length - MAX_VISIBLE);
+    const shown = this.slabs.slice(firstVisible);
+    const { offsets, height } = stackLayout(
+      shown.map((slab) => slabHeight({ band: slab.band, textRenderInfo: slab.text.textRenderInfo })),
+    );
     this.slabs.forEach((slab, i) => {
       slab.visible = i >= firstVisible;
-      slab.position.y = (i - firstVisible) * SLAB_PITCH;
+      if (slab.visible) slab.position.y = offsets[i - firstVisible];
     });
-    const shown = Math.min(this.slabs.length, MAX_VISIBLE);
-    this.beacon.position.y = STACK_BOTTOM + shown * SLAB_PITCH + 0.25;
+    this.beacon.position.y = STACK_BOTTOM + height + 0.25;
   }
 
   #drop(slab) {
