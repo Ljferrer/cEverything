@@ -1,6 +1,6 @@
 // Task 2 tests: say, fork, pipe through a fake plan 1 ctx. Cases are named
 // for the End states they prove (ES4, ES5, ES6, ES10).
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import * as say from './say.mjs';
 import * as fork from './fork.mjs';
@@ -64,6 +64,25 @@ test('ES4 say emits a user slab, submits the prompt, resolves undefined', async 
   assert.ok(slab.id.startsWith('user-'));
   assert.equal(typeof slab.ts, 'number');
   assert.deepEqual(owners.a.calls, [['prompt.submit', { session_id: 'a', text: 'hi' }]]);
+});
+
+test('ES4 two say calls inside one millisecond get distinct slab ids', async () => {
+  mock.timers.enable({ apis: ['Date'], now: 1000 });
+  try {
+    const { ctx, emitted } = makeCtx();
+    await say.handle({ t: 'say', sid: 'a', text: 'one' }, ctx);
+    await say.handle({ t: 'say', sid: 'a', text: 'two' }, ctx);
+    assert.equal(emitted.length, 2);
+    assert.deepEqual(
+      emitted.map((f) => f.ts),
+      [1000, 1000],
+    );
+    const ids = new Set(emitted.map((f) => f.id));
+    assert.equal(ids.size, 2);
+    for (const id of ids) assert.ok(id.startsWith('user-1000-'), id);
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test('ES5 fork branches with the owner title, emits nothing, resolves undefined', async () => {
