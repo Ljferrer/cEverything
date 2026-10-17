@@ -64,3 +64,9 @@ test('isClientCommand rejects server events, a wrong t, and a missing field', ()
   assert.equal(isClientCommand({ t: 'voice', sid: 's1', mime: 'audio/webm' }), false);
   assert.equal(isClientCommand(undefined), false);
 });
+
+test('optional keys may be absent entirely, not only null; a non-string parent is rejected', () => {
+  assert.equal(isServerEvent({ t: 'session', sid: 's', harness: 'hermes', kind: 'chat', title: 'Plan', status: 'idle' }), true);
+  assert.equal(isServerEvent({ t: 'tool', sid: 's', id: 't', name: 'terminal', phase: 'start' }), true);
+  assert.equal(isServerEvent({ t: 'session', sid: 's', harness: 'hermes', kind: 'chat', title: 'Plan', status: 'idle', parent: 7 }), false);
+});

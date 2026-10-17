@@ -16,14 +16,28 @@
 // by property access: plan 5's voice awaits `ctx.commands.say.handle(...)`.
 // `relay.commands` is that same object.
 //
+// Loader rules: `loadModules` imports every `*.mjs` except `*.test.mjs` and
+// treats a missing dir as empty. A source module without a `start` function
+// and a command module without both a string `name` and a `handle` function
+// are logged and skipped at load time, so a stray helper file beside the
+// modules never breaks startup or registers a phantom command.
+//
+// Audience rule: `emit(frame)` from a source or a command broadcasts to every
+// client and to `--record`. A command's resolved return frame goes only to the
+// issuing client. Commands return error frames (`{t:'error', text}`) and never
+// emit them. `relay.slabs` is a `Map<sid, slab[]>`, oldest first; plan 2's
+// pipe reads it.
+//
 // Every outbound `{t:'mode', mode, canEdit}` frame is composed here: `mode` is
 // `synthetic` when only the fallback runs, `replay` when a started source is
 // named `replay`, else `live`. A source-emitted `{t:'mode', mode}` only updates
 // that state and is never broadcast raw.
 //
-// CLI: node server/relay.mjs [--source a,b] [--record <file>] [--port 8787]
-// Flags the relay does not own (`--replay`, `--seed`, `--fast`) are ignored
-// here; sources read them from process.argv themselves.
+// CLI: node server/relay.mjs [--source a,b] [--record <file>] [--port <n>]
+// The port is `--port`, else `OBELISKS_PORT`, else 8787 (`resolvePort`), so
+// later plans' tests spawn relays on free ports in parallel. Flags the relay
+// does not own (`--replay`, `--seed`, `--fast`) are ignored here; sources read
+// them from process.argv themselves.
 import { WebSocketServer } from 'ws';
 import { readdir, appendFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
@@ -34,8 +48,17 @@ import { isServerEvent, isClientCommand, MODES } from '../shared/protocol.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_SOURCES = ['hermes', 'claude'];
+export const DEFAULT_PORT = 8787;
 export const SLAB_CACHE = 200;
 export const VIEW_ONLY = 'view-only link';
+
+/** The listen port: an explicit `flag` (from `--port` or the `port` option), else `env.OBELISKS_PORT`, else DEFAULT_PORT. */
+export function resolvePort(flag, env = process.env) {
+  if (typeof flag === 'number' && Number.isFinite(flag)) return flag;
+  const fromEnv = env.OBELISKS_PORT;
+  if (typeof fromEnv === 'string' && fromEnv.trim() !== '' && Number.isFinite(Number(fromEnv))) return Number(fromEnv);
+  return DEFAULT_PORT;
+}
 
 /** Import every *.mjs in `dir` (sorted by filename) as `Map<basename, module>`. A missing dir is empty. */
 export async function loadModules(dir) {
@@ -61,7 +84,7 @@ export function modeFor(started) {
 }
 
 export async function startRelay({
-  port = 8787,
+  port = resolvePort(undefined),
   sources: wanted = DEFAULT_SOURCES,
   record = null,
   editKey = process.env.OBELISKS_EDIT_KEY ?? 'edit',
@@ -70,9 +93,20 @@ export async function startRelay({
   log = (...a) => console.error('[relay]', ...a),
 } = {}) {
   const sourceMods = await loadModules(sourcesDir);
+  for (const [file, mod] of sourceMods) {
+    if (typeof mod.start === 'function') continue;
+    log(`source ${file} has no start, skipped`);
+    sourceMods.delete(file);
+  }
   const commandMods = await loadModules(commandsDir);
   const commands = Object.create(null);
-  for (const [file, mod] of commandMods) commands[mod.name ?? file] = mod;
+  for (const [file, mod] of commandMods) {
+    if (typeof mod.name !== 'string' || typeof mod.handle !== 'function') {
+      log(`command ${file} lacks name or handle, skipped`);
+      continue;
+    }
+    commands[mod.name] = mod;
+  }
 
   const relay = {
     port,
@@ -80,7 +114,7 @@ export async function startRelay({
     clients: new Set(),
     /** sid → last `session` frame, kept so a late client sees every obelisk. */
     sessions: new Map(),
-    /** sid → last SLAB_CACHE `slab` frames, in arrival order. Each entry is the relay's own copy: a `delta` appends to it, never to the source's object. */
+    /** sid → last SLAB_CACHE `slab` frames, oldest first (plan 2's pipe reads it). Each entry is the relay's own copy: a `delta` appends to it, never to the source's object. */
     slabs: new Map(),
     /** sid → last `state` frame, replayed after the slabs so a late client sees the current status. */
     states: new Map(),
