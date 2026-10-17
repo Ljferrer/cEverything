@@ -350,6 +350,20 @@ test('ES8 a transcript and an agent file created after start join on the next re
   assert.equal(a3.phase, 'Audit');
   assert.equal(a3.title, 'late:fixtures');
   await s.until((f) => f.some((x) => x.t === 'slab' && x.sid === 'a3'), 2000, 'late agent slab');
+  await s.until((f) => f.some((x) => x.t === 'slab' && x.sid === 'sid2'), 2000, 'late chat slab');
+  // Two more poll ticks: a tick that saw a half-seeded late file would have
+  // sent its frames before the `session` and the seed would repeat them.
+  await sleep(500);
+  for (const sid of ['sid2', 'a3']) {
+    const idx = (pred) => s.frames.findIndex((x) => x.sid === sid && pred(x));
+    const session = idx((x) => x.t === 'session');
+    const firstSlab = idx((x) => x.t === 'slab');
+    const firstState = idx((x) => x.t === 'state');
+    assert.ok(session < firstSlab, `${sid}: session at ${session} must precede its first slab at ${firstSlab}`);
+    assert.ok(firstState === -1 || session < firstState, `${sid}: session at ${session} must precede its first state at ${firstState}`);
+  }
+  const ids = s.frames.filter((x) => x.t === 'slab').map((x) => x.id);
+  assert.equal(new Set(ids).size, ids.length, `repeated slab id in ${JSON.stringify(ids)}`);
 });
 
 test('ES9 an explicit root tracks a stale transcript; applyWindow waits for growth', async (t) => {

@@ -212,7 +212,7 @@ export async function start({
   if (!rootStat?.isDirectory()) throw new Error(`claude root is not a directory: ${root}`);
 
   const startedAt = Date.now();
-  /** path → tracked file record. */
+  /** path → tracked file record; a record joins only after its `session` and seed are sent, so a tick never reads a half-seeded file. */
   const files = new Map();
   let stopped = false;
 
@@ -364,7 +364,9 @@ export async function start({
       status: undefined,
       reading: false,
     };
-    files.set(p, f);
+    // `f` stays local until the seed is sent: the poll tick iterates `files`,
+    // and a record it could see with offset 0 would be tailed from byte 0 and
+    // its frames sent (and later re-sent by the seed) before the `session`.
     let st;
     let data;
     try {
@@ -372,7 +374,6 @@ export async function start({
       data = await readFile(p);
     } catch (err) {
       log(`cannot read ${p}: ${err.message}`);
-      files.delete(p);
       return;
     }
     f.offset = data.length;
@@ -403,6 +404,7 @@ export async function start({
     if (stopped) return;
     send(session);
     for (const frame of seed) send(frame);
+    files.set(p, f);
   }
 
   /** Read the bytes appended since the last offset; a shrink restarts from 0. */
