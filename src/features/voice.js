@@ -8,8 +8,12 @@
 // on the bus, so the feature is inert there.
 //
 // Bus surface: reads `mode` (`canEdit`), `selectstart`, `selectend`, `error`;
-// sets `bus.talking` to the sid once a hold passes 300 ms and clears it on
-// release (plan 6's fork reads it, PIN-76); dispatches
+// sets `bus.talking` to the sid once a hold passes 300 ms and clears it when
+// the take ends (plan 6's fork reads it, PIN-76). A take ends on the arming
+// controller's `selectend`, on the XR session's end, or when the recorder
+// stops on its own; a `selectend` from another controller is ignored. Only a
+// take whose hold had set `bus.talking` before release is sent, so one press
+// never both forks and talks. Dispatches
 // `talk {phase:'start'|'sent'|'dropped'|'error', sid, ms}` (PIN-69).
 import { Text } from 'troika-three-text';
 
@@ -18,11 +22,16 @@ const ERROR_WINDOW_MS = 10_000;
 const MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/mp4'];
 const GLYPH_TEXT = '● REC';
 
-/** The mic stream, requested once at the VRButton click and kept for the page lifetime (PIN-62). */
+/**
+ * The mic stream, requested at the VRButton click and kept while its track is
+ * live (PIN-62). A stream whose track ended counts as missing and is requested
+ * again at the next click.
+ */
 let stream = null;
-let streamRequested = false;
+/** The running getUserMedia request, or null; every caller awaits the same one. */
+let pending = null;
 
-export function install({ scene, camera, bus, net }) {
+export function install({ scene, camera, renderer, bus, net }) {
   installMic();
 
   // Subscribe synchronously: the relay's single `mode` frame can land right
@@ -41,7 +50,7 @@ export function install({ scene, camera, bus, net }) {
   bus.addEventListener('selectstart', (e) => {
     const sid = e.detail?.sid ?? null;
     if (sid == null || sid !== bus.selected || !canEdit || rec) return;
-    if (!stream) {
+    if (!stream?.active) {
       talk('error', sid);
       console.log('voice: no mic stream');
       return;
@@ -64,11 +73,13 @@ export function install({ scene, camera, bus, net }) {
     }
     rec = {
       sid,
+      controller: e.detail?.controller,
       recorder,
       chunks,
       mime: recorder.mimeType || chosen || '',
       startedAt: performance.now(),
       heldMs: 0,
+      armed: false,
       holdTimer: setTimeout(() => (bus.talking = sid), HOLD_MS),
       recognizer: startRecognizer(glyph),
     };
@@ -76,24 +87,51 @@ export function install({ scene, camera, bus, net }) {
     talk('start', sid);
   });
 
-  bus.addEventListener('selectend', () => {
-    if (!rec || rec.heldMs) return;
-    clearTimeout(rec.holdTimer);
-    bus.talking = null;
-    rec.heldMs = Math.max(1, Math.round(performance.now() - rec.startedAt));
-    stopRecognizer(rec.recognizer);
-    if (rec.recorder.state !== 'inactive') rec.recorder.stop();
-    else finish();
+  bus.addEventListener('selectend', (e) => {
+    if (!rec || rec.heldMs || e.detail?.controller !== rec.controller) return;
+    endTake(Math.max(1, Math.round(performance.now() - rec.startedAt)));
   });
 
-  // Runs from the recorder's `stop` event: drop a short or empty take, else
-  // send it and open the error window (PIN-61).
+  // Three's WebXRManager only disconnects the controllers at session end and
+  // never fires `selectend`, so a trigger still held when the session ends
+  // would leave the take running and `bus.talking` set until a reload. End
+  // the take as a short one: `heldMs` 1 makes finish() drop it.
+  renderer.xr.addEventListener('sessionend', () => {
+    if (!rec || rec.heldMs) return;
+    endTake(1);
+  });
+
+  // Ends the running take at `heldMs`: release the hold state, then stop the
+  // recorder, whose `stop` event runs finish().
+  function endTake(heldMs) {
+    release(rec);
+    rec.heldMs = heldMs;
+    if (rec.recorder.state !== 'inactive') rec.recorder.stop();
+    else finish();
+  }
+
+  // Releases the hold state of a take: the arming timer, `bus.talking`, the
+  // recognizer. `armed` records whether the hold had set `bus.talking` before
+  // the flag clears, read before the clear so the send decision and plan 6's
+  // fork read the same value for this press.
+  function release(take) {
+    clearTimeout(take.holdTimer);
+    take.armed = bus.talking === take.sid;
+    bus.talking = null;
+    stopRecognizer(take.recognizer);
+  }
+
+  // Runs from the recorder's `stop` event: drop an unarmed, short or empty
+  // take, else send it and open the error window (PIN-61). A recorder that
+  // stops on its own (track ended, recorder error) arrives here with `heldMs`
+  // still 0 and no release before it, so the hold state is released here too.
   async function finish() {
     const take = rec;
     if (!take) return;
+    if (!take.heldMs) release(take);
     const { sid, mime, heldMs: ms } = take;
     const blob = new Blob(take.chunks, { type: mime });
-    if (ms < HOLD_MS || blob.size === 0) {
+    if (!take.armed || ms < HOLD_MS || blob.size === 0) {
       rec = null;
       glyph.hide();
       talk('dropped', sid, ms);
@@ -186,25 +224,38 @@ function installMic() {
   );
 }
 
-/** Request the mic once; resolves true when a stream is held. */
-async function requestStream() {
-  if (stream) return true;
-  if (streamRequested) return false;
-  streamRequested = true;
+/**
+ * Request the mic; resolves true when a live stream is held. A click while a
+ * request runs awaits that same request, so a second click reads its result
+ * instead of a failure. A stream whose track ended is dropped and requested
+ * again.
+ */
+function requestStream() {
+  if (stream?.active) return Promise.resolve(true);
+  stream = null;
+  pending ??= acquireStream().finally(() => (pending = null));
+  return pending;
+}
+
+async function acquireStream() {
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     return true;
   } catch (err) {
-    streamRequested = false;
     console.log('voice: mic denied', err?.message ?? err);
     return false;
   }
 }
 
-/** The recorder mime: the first supported candidate, else `''` for the recorder default (PIN-63). */
+/**
+ * The recorder mime: the first supported candidate, else `''` for the recorder
+ * default (PIN-63). Read through `globalThis`: a bare `MediaRecorder?.` still
+ * throws ReferenceError where the global is undeclared.
+ */
 function pickMime() {
-  if (typeof MediaRecorder?.isTypeSupported !== 'function') return '';
-  return MIME_CANDIDATES.find((m) => MediaRecorder.isTypeSupported(m)) ?? '';
+  const Recorder = globalThis.MediaRecorder;
+  if (typeof Recorder?.isTypeSupported !== 'function') return '';
+  return MIME_CANDIDATES.find((m) => Recorder.isTypeSupported(m)) ?? '';
 }
 
 function readAsDataUrl(blob) {
@@ -292,8 +343,12 @@ function startRecognizer(glyph) {
 }
 
 function stopRecognizer(recognizer) {
+  if (!recognizer) return;
   try {
-    recognizer?.stop();
+    // Detach first: a final result after `stop()` would re-show the interim
+    // label after `glyph.hide()` ran.
+    recognizer.onresult = null;
+    recognizer.stop();
   } catch {
     // swallowed: the recognizer is a bonus
   }
