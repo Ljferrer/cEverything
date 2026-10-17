@@ -27,12 +27,6 @@ export const HEAD_CAP = 80;
 export const SUMMARY_CAP = 120;
 export const DEFAULTS = Object.freeze({ sinceMinutes: 30, max: 6, maxAgents: 8, pollMs: 1000, rescanMs: 5000, workingMs: 5000 });
 
-/** Bookkeeping line types that never yield a frame (PIN-45); `system` and `isMeta` user lines join them. */
-export const SKIPPED_TYPES = Object.freeze([
-  'system', 'attachment', 'queue-operation', 'custom-title', 'agent-name', 'file-history-snapshot',
-  'file-history-delta', 'last-prompt', 'atis-latch', 'bridge-session', 'summary',
-]);
-
 /** sid → {title, slabs: Map<id, text>} for `titleOf` and `slabText`, kept across starts. */
 const records = new Map();
 
@@ -362,7 +356,6 @@ export async function start({
       firstUserText: undefined,
       customTitleLine: undefined,
       status: undefined,
-      reading: false,
     };
     // `f` stays local until the seed is sent: the poll tick iterates `files`,
     // and a record it could see with offset 0 would be tailed from byte 0 and
@@ -409,8 +402,6 @@ export async function start({
 
   /** Read the bytes appended since the last offset; a shrink restarts from 0. */
   async function readTail(f) {
-    if (f.reading) return;
-    f.reading = true;
     try {
       const st = await stat(f.path);
       if (st.size < f.offset) {
@@ -433,8 +424,6 @@ export async function start({
       }
     } catch (err) {
       if (err.code !== 'ENOENT') log(`read failed for ${f.path}: ${err.message}`);
-    } finally {
-      f.reading = false;
     }
   }
 
