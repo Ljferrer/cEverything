@@ -1,6 +1,9 @@
 // hermes.mjs against a fake Hermes gateway: a `ws` server on an ephemeral port
-// per case that greets with `gateway.ready` and answers JSON-RPC requests. Each
-// case is named for the plan 2 End state it proves.
+// per case that greets with `gateway.ready` and answers JSON-RPC requests. Its
+// `event` helper sends the verified Hermes envelope
+// `{jsonrpc:'2.0', method:'event', params:{type, session_id, seq, payload}}`
+// with `session_id` on the envelope only, so the mapping cases prove the
+// envelope is unwrapped. Each case is named for the plan 2 End state it proves.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:net';
@@ -33,11 +36,19 @@ async function gateway({ sessions = [], history = () => ({ messages: [] }), onRe
     env() {
       return { HERMES_WS_URL: `ws://127.0.0.1:${this.port}/api/ws`, HERMES_DASHBOARD_SESSION_TOKEN: 'devtoken' };
     },
+    seq: 0,
     send(obj) {
       this.socket.send(JSON.stringify(obj));
     },
-    event(method, params) {
-      this.send({ jsonrpc: '2.0', method, params });
+    /** One event in the verified envelope; `session_id` rides the envelope, not the payload. */
+    event(type, params) {
+      const { session_id, ...payload } = params;
+      this.seq += 1;
+      this.send({ jsonrpc: '2.0', method: 'event', params: { type, session_id, seq: this.seq, payload } });
+    },
+    /** The pre-envelope bare notification `{method:<type>, params}`, kept as a read fallback. */
+    bareEvent(type, params) {
+      this.send({ jsonrpc: '2.0', method: type, params });
     },
     calls(method) {
       return this.requests.filter((r) => r.method === method);
@@ -285,6 +296,48 @@ test('ES14 session.history seeds one user and one assistant slab and drops the t
   assert.deepEqual(slabs.map((s) => [s.role, s.text]), [['user', 'q'], ['assistant', 'a']]);
   assert.ok(slabs.every((s) => s.sid === 's1' && isServerEvent(s)));
   assert.equal(hermes.slabText('s1', slabs[1].id), 'a');
+  const sessionAt = frames.findIndex((f) => f.t === 'session' && f.sid === 's1');
+  const firstSlabAt = frames.findIndex((f) => f.t === 'slab');
+  const stateAt = frames.findIndex((f) => f.t === 'state' && f.sid === 's1');
+  assert.ok(sessionAt >= 0 && sessionAt < firstSlabAt, 'the session frame precedes the seeded slabs');
+  assert.ok(stateAt > frames.findLastIndex((f) => f.t === 'slab'), 'the state frame follows the seeded slabs');
+});
+
+test('a bare gateway.ready and bare events are read as a fallback to the envelope', async () => {
+  const wss = new WebSocketServer({ port: 0 });
+  await new Promise((resolve) => wss.once('listening', resolve));
+  gateways.push({ close: () => new Promise((resolve) => wss.close(resolve)) });
+  let socket = null;
+  wss.on('connection', (ws) => {
+    socket = ws;
+    ws.on('message', (data) => {
+      const msg = JSON.parse(String(data));
+      if (msg.id === undefined || !msg.method) return;
+      const result = msg.method === 'session.active_list' ? { sessions: [session('s1', 'idle')] } : msg.method === 'session.history' ? { messages: [] } : {};
+      ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }));
+    });
+    ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'gateway.ready', params: { version: 'bare' } }));
+  });
+  const c = collector();
+  const handle = await hermes.start({
+    emit: c.emit,
+    argv: [],
+    env: { HERMES_WS_URL: `ws://127.0.0.1:${wss.address().port}/api/ws`, HERMES_CONNECT_TIMEOUT_MS: '500' },
+  });
+  started.push(handle);
+  socket.send(JSON.stringify({ jsonrpc: '2.0', method: 'message.complete', params: { session_id: 's1', role: 'assistant', message_id: 'b1', content: 'bare' } }));
+  socket.send(JSON.stringify({ event: 'error', payload: { session_id: 's1' } }));
+  await c.until((f) => f.some((x) => x.t === 'state' && x.status === 'error'));
+  assert.deepEqual(c.frames.filter((f) => f.t === 'slab').map((f) => [f.id, f.text]), [['b1', 'bare']]);
+});
+
+test('an envelope whose payload carries no session_id maps by the envelope session_id; a session_id-less envelope emits nothing', async () => {
+  const g = await gateway({ sessions: [session('s1', 'idle')] });
+  const { frames, until } = await startAgainst(g);
+  g.send({ jsonrpc: '2.0', method: 'event', params: { type: 'message.complete', seq: 1, payload: { role: 'assistant', message_id: 'x', content: 'no sid' } } });
+  g.send({ jsonrpc: '2.0', method: 'event', params: { type: 'message.complete', session_id: 's1', seq: 2, payload: { role: 'assistant', message_id: 'e1', content: 'enveloped' } } });
+  await until((f) => f.some((x) => x.id === 'e1'));
+  assert.deepEqual(frames.filter((f) => f.t === 'slab').map((f) => [f.sid, f.id, f.text]), [['s1', 'e1', 'enveloped']]);
 });
 
 test('ES15 a request from the gateway is answered with -32601 and emits nothing', async () => {
@@ -319,7 +372,7 @@ test('message.start, delta and complete stream one assistant slab; thinking and 
   g.event('message.complete', { session_id: 's1', role: 'assistant', message_id: 'm1', content: 'Hello!' });
   g.event('reasoning.delta', { session_id: 's1', delta: 'hmm' });
   g.event('tool.start', { session_id: 's1', name: 'terminal', args: { cmd: 'ls' } });
-  g.event('tool.complete', { session_id: 's1', name: 'terminal', summary: '3 files', inline_diff: '+a' });
+  g.bareEvent('tool.complete', { session_id: 's1', name: 'terminal', summary: '3 files', inline_diff: '+a' });
   await until((f) => f.some((x) => x.t === 'tool' && x.phase === 'complete'));
   const forM1 = frames.filter((f) => f.id === 'm1');
   assert.deepEqual(forM1.map((f) => [f.t, f.text]), [['slab', ''], ['delta', 'Hel'], ['delta', 'lo'], ['delta', '!']]);

@@ -10,9 +10,12 @@
 // only then does a socket close start the background retry every 5 s
 // (HERMES_RETRY_MS shortens it for tests).
 //
-// Wire shape assumed from the Hermes TUI gateway: events are JSON-RPC
-// notifications `{jsonrpc, method, params}` (a `{event, payload}` pair is read
-// the same way); a frame with both `id` and `method` is a request from Hermes
+// Wire shape (verified in the plan Context against hermes-agent
+// `tui_gateway/contracts/events.py` at 59ee4989): every event is the envelope
+// `{jsonrpc:'2.0', method:'event', params:{type, session_id, seq, payload}}`;
+// `unwrapEvent` flattens it to `[type, {...payload, session_id}]`. A bare
+// notification `{method:<type>, params}` or an `{event, payload}` pair is read
+// as a fallback. A frame with both `id` and `method` is a request from Hermes
 // and is answered -32601 (PIN-35).
 import { WebSocket } from 'ws';
 
@@ -182,8 +185,26 @@ function onMessage(raw) {
     } else p.resolve(msg.result ?? {});
     return;
   }
-  if (typeof msg.method === 'string') onEvent(msg.method, msg.params ?? msg.payload ?? {});
-  else if (typeof msg.event === 'string') onEvent(msg.event, msg.payload ?? msg.params ?? {});
+  const ev = unwrapEvent(msg);
+  if (ev) onEvent(ev[0], ev[1]);
+}
+
+/**
+ * `[type, params]` of an event frame, or null for a non-event. The verified
+ * envelope `{method:'event', params:{type, session_id, seq, payload}}` yields
+ * the payload with `session_id` from the envelope (the payload's own as a
+ * fallback). A bare `{method:<type>, params}` notification or an
+ * `{event, payload}` pair yields its fields as they are.
+ */
+function unwrapEvent(msg) {
+  if (msg.method === 'event' && typeof msg.params?.type === 'string') {
+    const ep = msg.params;
+    const payload = ep.payload && typeof ep.payload === 'object' ? ep.payload : {};
+    return [ep.type, { ...payload, session_id: ep.session_id ?? payload.session_id }];
+  }
+  if (typeof msg.method === 'string') return [msg.method, msg.params ?? msg.payload ?? {}];
+  if (typeof msg.event === 'string') return [msg.event, msg.payload ?? msg.params ?? {}];
+  return null;
 }
 
 // ---- Attach (PIN-11, PIN-35) ----
@@ -215,7 +236,12 @@ function seedHistory(sid, history) {
   }
 }
 
-/** Resume, seed history, and announce one session; idempotent by sid and safe under concurrent calls. */
+/**
+ * Resume, announce, seed history, and report state for one session; idempotent
+ * by sid and safe under concurrent calls. The `session` frame goes out before
+ * the history slabs because a client drops a slab for a sid it has no obelisk
+ * for yet (`src/features/room.js`), the order the relay's own backfill uses.
+ */
 function attach(info) {
   const sid = info?.session_id;
   if (typeof sid !== 'string' || !sid) return Promise.resolve();
@@ -247,8 +273,8 @@ function attach(info) {
       }
       const frame = sessionFrame(info);
       sessions.set(sid, frame);
-      if (history) seedHistory(sid, history);
       emit(frame);
+      if (history) seedHistory(sid, history);
       emit({ t: 'state', sid, status: frame.status });
     } else {
       const prev = sessions.get(sid);
@@ -396,7 +422,7 @@ function onEvent(name, p) {
 
 // ---- Connect, start, retry ----
 
-/** Open the socket and resolve on `gateway.ready`; reject on error, close, or the connect timeout, with the socket closed. */
+/** Open the socket and resolve on the `gateway.ready` event (envelope or bare); reject on error, close, or the connect timeout, with the socket closed. */
 function connect(env) {
   const url = new URL(env.HERMES_WS_URL ?? DEFAULT_WS_URL);
   const token = env.HERMES_DASHBOARD_SESSION_TOKEN;
@@ -425,7 +451,7 @@ function connect(env) {
       } catch {
         return;
       }
-      if (msg?.method === 'gateway.ready' || msg?.event === 'gateway.ready') {
+      if (msg && typeof msg === 'object' && unwrapEvent(msg)?.[0] === 'gateway.ready') {
         settled = true;
         clearTimeout(timer);
         sock.removeAllListeners('error');
