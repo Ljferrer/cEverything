@@ -1,5 +1,8 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { startRelay } from '../server/relay.mjs';
 import { createBus } from './bus.js';
 import { createNet, relayUrl } from './net.js';
@@ -31,7 +34,9 @@ test('relayUrl forwards the page key and picks wss on https', () => {
 });
 
 test('net re-emits server events on the bus under their t and sends commands', async () => {
-  const r = await startRelay({ port: 0, sources: ['synthetic'], log: () => {} });
+  // An empty commands dir: the real server/commands/ now holds fork (plan 2).
+  const commandsDir = await mkdtemp(path.join(tmpdir(), 'obelisks-net-nocmd-'));
+  const r = await startRelay({ port: 0, sources: ['synthetic'], commandsDir, log: () => {} });
   relays.push(r);
   const bus = createBus();
   const net = openNet(bus, `ws://127.0.0.1:${r.port}/relay?key=edit`);
