@@ -46,7 +46,7 @@ let emit = () => {};
 let ws = null;
 let stopped = true;
 let attachedOnce = false;
-/** Run counter, bumped by `start`: a retry still connecting for an earlier run bails out instead of touching the new run's socket. */
+/** Run counter, bumped by `start`: a retry still connecting or attaching for an earlier run bails out instead of touching the new run's socket, table, or emit. */
 let gen = 0;
 let retryTimer = null;
 let nextId = 1;
@@ -314,10 +314,19 @@ function attach(info) {
   return p;
 }
 
+/**
+ * List the active sessions and attach each in turn. A new `start` during the
+ * loop ends it: `stop` rejected this run's requests, and the next `attach`
+ * would otherwise write an error-status session into the new run's table.
+ */
 async function listAndAttach() {
+  const run = gen;
   const result = await request('session.active_list', {});
   const list = Array.isArray(result) ? result : Array.isArray(result?.sessions) ? result.sessions : [];
-  for (const info of list) await attach(info);
+  for (const info of list) {
+    if (run !== gen) return;
+    await attach(info);
+  }
 }
 
 // ---- Event mapping (PIN-30) ----
