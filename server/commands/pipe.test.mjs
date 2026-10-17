@@ -131,8 +131,22 @@ test('ES6 an empty titleOf result falls back to the sid', async () => {
 
 test('ES10 pipe says the quoted slab on the target through ctx.commands.say', async () => {
   const { ctx, emitted, owners } = makeCtx();
+  // Wrap the ctx-supplied say: a pipe.mjs that imported say.handle directly
+  // (bypassing ctx.commands) would leave `delegated` empty and fail here.
+  const delegated = [];
+  ctx.commands = {
+    say: {
+      ...say,
+      handle: (c, x) => {
+        delegated.push(c);
+        return say.handle(c, x);
+      },
+    },
+  };
   const result = await pipe.handle({ t: 'pipe', from: 's1', to: 's2', slab: 'm1' }, ctx);
   assert.equal(result, undefined);
+  assert.equal(delegated.length, 1);
+  assert.equal(delegated[0].text, 'From S1: hello');
   assert.equal(emitted.length, 1);
   const slab = emitted[0];
   assert.ok(isServerEvent(slab));
