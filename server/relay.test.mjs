@@ -162,7 +162,8 @@ test('setMode re-sends mode to every client with its own canEdit', async () => {
 });
 
 test('an editor command with no module gets an error; bad json and bad shapes too', async () => {
-  const r = await relay();
+  // An empty commands dir: the real server/commands/ now holds fork (plan 2).
+  const r = await relay({ commandsDir: await mkdtemp(path.join(tmpdir(), 'obelisks-nocmd-')) });
   const c = connect(r, '?key=edit');
   await c.until((f) => f.length >= 1);
   c.send({ t: 'fork', sid: 'syn-a' });
