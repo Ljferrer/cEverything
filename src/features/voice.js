@@ -8,10 +8,8 @@
 // on the bus, so the feature is inert there.
 //
 // Bus surface: reads `mode` (`canEdit`), `selectstart`, `selectend`, `error`;
-// sets `bus.talking` to the sid once a hold passes 300 ms and clears it when
-// the take ends, on release or when the recorder stops on its own (plan 6's
-// fork reads it, PIN-76). A `selectend` from a controller other than the one
-// that armed the take is ignored. Dispatches
+// sets `bus.talking` to the sid once a hold passes 300 ms and clears it on
+// release (plan 6's fork reads it, PIN-76); dispatches
 // `talk {phase:'start'|'sent'|'dropped'|'error', sid, ms}` (PIN-69).
 import { Text } from 'troika-three-text';
 
@@ -66,7 +64,6 @@ export function install({ scene, camera, bus, net }) {
     }
     rec = {
       sid,
-      controller: e.detail?.controller,
       recorder,
       chunks,
       mime: recorder.mimeType || chosen || '',
@@ -79,8 +76,8 @@ export function install({ scene, camera, bus, net }) {
     talk('start', sid);
   });
 
-  bus.addEventListener('selectend', (e) => {
-    if (!rec || rec.heldMs || e.detail?.controller !== rec.controller) return;
+  bus.addEventListener('selectend', () => {
+    if (!rec || rec.heldMs) return;
     clearTimeout(rec.holdTimer);
     bus.talking = null;
     rec.heldMs = Math.max(1, Math.round(performance.now() - rec.startedAt));
@@ -90,17 +87,10 @@ export function install({ scene, camera, bus, net }) {
   });
 
   // Runs from the recorder's `stop` event: drop a short or empty take, else
-  // send it and open the error window (PIN-61). A recorder that stops on its
-  // own (track ended, recorder error) arrives here with `heldMs` still 0 and
-  // no `selectend` before it, so the hold state is released here too.
+  // send it and open the error window (PIN-61).
   async function finish() {
     const take = rec;
     if (!take) return;
-    if (!take.heldMs) {
-      clearTimeout(take.holdTimer);
-      if (bus.talking === take.sid) bus.talking = null;
-      stopRecognizer(take.recognizer);
-    }
     const { sid, mime, heldMs: ms } = take;
     const blob = new Blob(take.chunks, { type: mime });
     if (ms < HOLD_MS || blob.size === 0) {
@@ -302,12 +292,8 @@ function startRecognizer(glyph) {
 }
 
 function stopRecognizer(recognizer) {
-  if (!recognizer) return;
   try {
-    // Detach first: a final result after `stop()` would re-show the interim
-    // label after `glyph.hide()` ran.
-    recognizer.onresult = null;
-    recognizer.stop();
+    recognizer?.stop();
   } catch {
     // swallowed: the recognizer is a bonus
   }
