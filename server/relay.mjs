@@ -9,8 +9,10 @@
 // command module exports `name` (matches the command's `t`) and
 // `handle(cmd, ctx)`; the relay awaits `handle` and sends its resolved frame
 // (if any) back to the issuing client. `ctx` is `{relay, sources, commands,
-// emit, ownerOf(sid)}`, where `commands` is the loaded command map keyed by
-// `name` so one command can delegate to another (voice → say).
+// emit, ownerOf(sid)}`, where `commands` is a null-prototype plain object
+// keyed by `name` (`ctx.commands.say`), so one command can delegate to another
+// by property access: plan 5's voice awaits `ctx.commands.say.handle(...)`.
+// `relay.commands` is that same object.
 //
 // Every outbound `{t:'mode', mode, canEdit}` frame is composed here: `mode` is
 // `synthetic` when only the fallback runs, `replay` when a started source is
@@ -67,8 +69,8 @@ export async function startRelay({
 } = {}) {
   const sourceMods = await loadModules(sourcesDir);
   const commandMods = await loadModules(commandsDir);
-  const commands = new Map();
-  for (const [file, mod] of commandMods) commands.set(mod.name ?? file, mod);
+  const commands = Object.create(null);
+  for (const [file, mod] of commandMods) commands[mod.name ?? file] = mod;
 
   const relay = {
     port,
@@ -146,7 +148,7 @@ export async function startRelay({
     const reply = (text) => client && sendTo(client, { t: 'error', text });
     if (!isClientCommand(cmd)) return reply('bad command');
     if (client && !client.canEdit) return reply(VIEW_ONLY);
-    const mod = commands.get(cmd.t);
+    const mod = commands[cmd.t];
     if (!mod?.handle) return reply(`no command: ${cmd.t}`);
     let result;
     try {

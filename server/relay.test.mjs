@@ -186,15 +186,16 @@ test('a rejecting source is skipped, synthetic runs; an editor command reaches i
     `export const name = 'say';\n` +
       `export async function handle(cmd, { emit, ownerOf, commands }) {\n` +
       `  emit({ t: 'slab', sid: cmd.sid, id: 'echo', role: 'user', text: cmd.text + (ownerOf(cmd.sid) ? ' [owned]' : ''), ts: 0 });\n` +
-      `  return { t: 'state', sid: cmd.sid, status: commands.has('say') && commands.has('fork') ? 'working' : 'error' };\n` +
+      `  return { t: 'state', sid: cmd.sid, status: 'say' in commands && 'fork' in commands ? 'working' : 'error' };\n` +
       `}\n`,
   );
-  // A second module that delegates to `say` through ctx.commands (the voice → say seam).
+  // A second module that delegates to `say` by property access on ctx.commands,
+  // the exact form plan 5's voice uses: `ctx.commands.say.handle(...)`.
   await writeFile(
     path.join(dir, 'commands', 'fork.mjs'),
     `export const name = 'fork';\n` +
       `export async function handle(cmd, ctx) {\n` +
-      `  return ctx.commands.get('say').handle({ t: 'say', sid: cmd.sid, text: 'forked' }, ctx);\n` +
+      `  return ctx.commands.say.handle({ t: 'say', sid: cmd.sid, text: 'forked' }, ctx);\n` +
       `}\n`,
   );
   const logged = [];
@@ -208,6 +209,12 @@ test('a rejecting source is skipped, synthetic runs; an editor command reaches i
   assert.deepEqual([...r.sources.keys()], ['synthetic']);
   assert.ok(logged.some((l) => l.includes('boom') && l.includes('skipped')));
   assert.ok(logged.some((l) => l.includes('no source module: missing')));
+  // relay.commands is the object ctx carries: a null-prototype plain object keyed
+  // by `name`, so `commands.say` resolves and no Object.prototype key leaks in.
+  assert.equal(Object.getPrototypeOf(r.commands), null);
+  assert.deepEqual(Object.keys(r.commands), ['fork', 'say']);
+  assert.equal(typeof r.commands.say.handle, 'function');
+  assert.equal('toString' in r.commands, false);
 
   const c = connect(r, '?key=edit');
   const other = connect(r);
