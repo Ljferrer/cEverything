@@ -33,6 +33,9 @@ async function gateway({ sessions = [], history = () => ({ messages: [] }), onRe
     socket: null,
     sessions,
     waiters: [],
+    /** While true, a new connection gets no `gateway.ready` until `releaseReady()`. */
+    holdReady: false,
+    held: [],
     env() {
       return { HERMES_WS_URL: `ws://127.0.0.1:${this.port}/api/ws`, HERMES_DASHBOARD_SESSION_TOKEN: 'devtoken' };
     },
@@ -52,6 +55,13 @@ async function gateway({ sessions = [], history = () => ({ messages: [] }), onRe
     },
     calls(method) {
       return this.requests.filter((r) => r.method === method);
+    },
+    /** Send `gateway.ready` on every connection `holdReady` held back. */
+    releaseReady() {
+      for (const ws of this.held.splice(0)) {
+        this.socket = ws;
+        this.event('gateway.ready', { version: 'fake' });
+      }
     },
     /** Resolve once a request with `method` has arrived `n` times. */
     received(method, n = 1, ms = 5000) {
@@ -85,7 +95,8 @@ async function gateway({ sessions = [], history = () => ({ messages: [] }), onRe
       }
       ws.send(JSON.stringify({ jsonrpc: '2.0', id: msg.id, ...reply }));
     });
-    g.event('gateway.ready', { version: 'fake' });
+    if (g.holdReady) g.held.push(ws);
+    else g.event('gateway.ready', { version: 'fake' });
   });
   gateways.push(g);
   return g;
@@ -454,6 +465,75 @@ test('a retry whose handshake fails without a close drops that socket before the
   await until((fs) => fs.filter((f) => f.t === 'slab').length > slabsBefore);
   await sleep(50);
   assert.equal(frames.filter((f) => f.t === 'slab' && f.id === 'm9').length, 1, 'the live socket is processed once');
+});
+
+test('a sid resumed on a socket whose handshake then fails is resumed again on the next socket', async () => {
+  let lists = 0;
+  let heldList = null;
+  const g = await gateway({
+    sessions: [session('s1', 'idle')],
+    onRequest(msg, gw) {
+      if (msg.method === 'session.active_list') {
+        lists += 1;
+        if (lists !== 2) return undefined;
+        // The retry socket learns of s1 (and resumes it) before its listing fails.
+        heldList = msg.id;
+        gw.event('session.status', { session_id: 's1', status: 'idle' });
+        return false;
+      }
+      if (msg.method === 'session.resume' && heldList !== null) {
+        const id = heldList;
+        heldList = null;
+        setImmediate(() => gw.send({ jsonrpc: '2.0', id, error: { code: -32000, message: 'listing failed' } }));
+      }
+      return undefined;
+    },
+  });
+  await startAgainst(g, { env: { HERMES_RETRY_MS: '50' } });
+  g.socket.close();
+  await g.received('session.active_list', 3, 3000);
+  await g.received('session.resume', 3, 3000);
+  assert.deepEqual(g.calls('session.resume').map((r) => r.params.session_id), ['s1', 's1', 's1'], 'every socket resumes s1');
+});
+
+test('a retry whose connect fails after a new start leaves the new run\'s socket streaming', async () => {
+  const g1 = await gateway({ sessions: [session('s1', 'idle')] });
+  await startAgainst(g1, { env: { HERMES_RETRY_MS: '50', HERMES_CONNECT_TIMEOUT_MS: '300' } });
+  g1.holdReady = true;
+  g1.socket.close();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(g1.held.length, 1, 'the retry is connecting while gateway.ready is held');
+  const g2 = await gateway({ sessions: [session('s2', 'idle')] });
+  const { frames, until } = await startAgainst(g2);
+  const live = g2.socket;
+  await new Promise((resolve) => g1.held[0].once('close', resolve));
+  await sleep(50);
+  assert.equal(live.readyState, live.OPEN, 'the new run\'s socket survives the stale retry\'s failure');
+  g2.event('message.complete', { session_id: 's2', role: 'user', message_id: 'm2', content: 'still here' });
+  await until((fs) => fs.some((f) => f.t === 'slab' && f.id === 'm2'));
+  assert.equal(frames.filter((f) => f.t === 'slab' && f.id === 'm2').length, 1);
+});
+
+test('a retry whose connect succeeds after a new start closes that late socket and never handshakes on it', async () => {
+  const g1 = await gateway({ sessions: [session('s1', 'idle')] });
+  await startAgainst(g1, { env: { HERMES_RETRY_MS: '50' } });
+  g1.holdReady = true;
+  g1.socket.close();
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.equal(g1.held.length, 1, 'the retry is connecting while gateway.ready is held');
+  const g2 = await gateway({ sessions: [session('s2', 'idle')] });
+  const { frames, until } = await startAgainst(g2);
+  const live = g2.socket;
+  const late = g1.held[0];
+  const closed = new Promise((resolve) => late.once('close', () => resolve('closed')));
+  g1.releaseReady();
+  assert.equal(await Promise.race([closed, sleep(1000).then(() => 'open')]), 'closed', 'the late socket is closed');
+  await sleep(50);
+  assert.equal(g1.calls('client.capabilities').length, 1, 'no handshake on the late socket');
+  assert.equal(live.readyState, live.OPEN, 'the new run\'s socket is still the live one');
+  g2.event('message.complete', { session_id: 's2', role: 'user', message_id: 'm3', content: 'still here' });
+  await until((fs) => fs.some((f) => f.t === 'slab' && f.id === 'm3'));
+  assert.equal(frames.filter((f) => f.t === 'slab' && f.id === 'm3').length, 1);
 });
 
 test('start resolves before --seed finishes: a held prompt.submit reply never delays the handle', async () => {
