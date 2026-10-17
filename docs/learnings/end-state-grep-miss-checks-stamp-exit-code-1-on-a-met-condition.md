@@ -2,7 +2,6 @@
 name: end-state-grep-miss-checks-stamp-exit-code-1-on-a-met-condition
 description: An end-state check shaped grep ; test $? -eq 1 && echo X is met but its captured log ends exit_code 1.
 metadata:
-  promoted: dev/obelisks-3@phase-1
   node_type: memory
   type: project
   keywords:

@@ -2,7 +2,6 @@
 name: relay-close-calls-a-module-level-stop-and-ignores-the-handle-a-source-start-returns
 description: "relay.close() stops a source only through a module-level stop export, so the claude source's returned stop handle is never called."
 metadata:
-  promoted: dev/obelisks-3@phase-1
   node_type: memory
   type: project
   keywords:

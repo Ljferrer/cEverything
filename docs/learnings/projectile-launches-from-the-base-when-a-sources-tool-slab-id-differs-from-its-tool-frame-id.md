@@ -2,7 +2,6 @@
 name: projectile-launches-from-the-base-when-a-sources-tool-slab-id-differs-from-its-tool-frame-id
 description: "If a source's tool slab id differs from its tool frame id, the sphere silently launches from the obelisk base."
 metadata:
-  promoted: dev/obelisks-4@phase-1
   node_type: memory
   type: project
   keywords:
