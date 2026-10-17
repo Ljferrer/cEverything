@@ -157,3 +157,13 @@ test('the beacon rides above the stack top in every band', () => {
   o.update(cameraAt(3));
   assert.ok(o.beacon.position.y > topOf());
 });
+
+test('slabMesh returns the slab object for an id, null for an unknown one', () => {
+  const o = roomWith(SHORT);
+  const m = o.slabMesh('a1');
+  assert.ok(m, 'found');
+  assert.equal(m.slabId, 'a1');
+  assert.deepEqual(m.userData, { sid: 's1', slabId: 'a1' });
+  assert.equal(m.parent, o.stack, 'the returned object is the one placed in the stack');
+  assert.equal(o.slabMesh('zz'), null);
+});
