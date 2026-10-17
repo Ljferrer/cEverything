@@ -115,6 +115,26 @@ test('the slab cache keeps the last 200 per session and replays to a late client
   late.ws.close();
 });
 
+test('a delta appends to the cached copy, never to the object the source emitted', async () => {
+  const r = await relay();
+  // One slab object and one delta object, emitted twice, as a looping source does.
+  const slab = { t: 'slab', sid: 'alias', id: 's1', role: 'assistant', text: 'base', ts: 1 };
+  const delta = { t: 'delta', sid: 'alias', id: 's1', role: 'assistant', text: '+more' };
+  for (let loop = 0; loop < 2; loop++) {
+    r.broadcast(slab, 'loop');
+    r.broadcast(delta, 'loop');
+  }
+  assert.equal(slab.text, 'base', 'the source object is untouched');
+  const cached = r.slabs.get('alias');
+  assert.equal(cached.length, 2);
+  assert.ok(cached.every((s) => s !== slab), 'the cache never holds the source object itself');
+  assert.deepEqual(cached.map((s) => s.text), ['base+more', 'base+more'], 'each cached copy holds the delta exactly once');
+  // A delta for an id with no cached slab is a no-op on the cache.
+  const stray = { t: 'delta', sid: 'alias', id: 'nope', role: 'assistant', text: 'x' };
+  assert.equal(r.broadcast(stray), true);
+  assert.deepEqual(cached.map((s) => s.text), ['base+more', 'base+more']);
+});
+
 test('an invalid frame is dropped, not broadcast', async () => {
   const r = await relay();
   const c = connect(r);

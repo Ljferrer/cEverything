@@ -62,7 +62,7 @@ export async function startRelay({
     clients: new Set(),
     /** sid → last `session` frame, kept so a late client sees every obelisk. */
     sessions: new Map(),
-    /** sid → last SLAB_CACHE `slab` frames, in arrival order. */
+    /** sid → last SLAB_CACHE `slab` frames, in arrival order. Each entry is the relay's own copy: a `delta` appends to it, never to the source's object. */
     slabs: new Map(),
     /** sid → name of the source that announced the session. */
     owners: new Map(),
@@ -92,7 +92,7 @@ export async function startRelay({
       if (s) relay.sessions.set(frame.sid, { ...s, status: frame.status });
     } else if (frame.t === 'slab') {
       const list = relay.slabs.get(frame.sid) ?? [];
-      list.push(frame);
+      list.push({ ...frame });
       if (list.length > SLAB_CACHE) list.splice(0, list.length - SLAB_CACHE);
       relay.slabs.set(frame.sid, list);
     } else if (frame.t === 'delta') {
