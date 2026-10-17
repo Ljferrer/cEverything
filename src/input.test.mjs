@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createBus } from './bus.js';
-import { hitToEvent, applySelection, rootOf, shouldInstallLaptop } from './input.js';
+import { hitToEvent, applySelection, rootOf, shouldInstallLaptop, latchLast } from './input.js';
 
 // A tiny stand-in for a three.js subtree: userData lives on the mesh or on an
 // ancestor, and a raycast hit names the deepest mesh.
@@ -65,4 +65,23 @@ test('shouldInstallLaptop: ?mode=laptop, no navigator.xr, or immersive-vr unsupp
   assert.equal(await shouldInstallLaptop(loc('?share=x'), xr(true)), false);
   // A rejected probe means no VR session can start, so the laptop view installs.
   assert.equal(await shouldInstallLaptop(loc(''), { xr: { isSessionSupported: async () => { throw new Error('nope'); } } }), true);
+});
+
+test('latchLast holds a frame emitted before a late subscriber, follows later frames, and stops', async () => {
+  const bus = createBus();
+  const latched = latchLast(bus, 'mode');
+  assert.equal(latched.last, null);
+  // The frame lands while the install probe is still pending.
+  bus.emit('mode', { t: 'mode', mode: 'synthetic', canEdit: false });
+  await new Promise((r) => setTimeout(r, 5));
+  assert.deepEqual(latched.last, { t: 'mode', mode: 'synthetic', canEdit: false });
+  // A later frame replaces it; the mirror arm of the finding (frame after the await).
+  bus.emit('mode', { t: 'mode', mode: 'live', canEdit: true });
+  assert.deepEqual(latched.last, { t: 'mode', mode: 'live', canEdit: true });
+  // Another event type is not latched.
+  bus.emit('session', { t: 'session', sid: 'x' });
+  assert.equal(latched.last.t, 'mode');
+  latched.stop();
+  bus.emit('mode', { t: 'mode', mode: 'replay', canEdit: true });
+  assert.deepEqual(latched.last, { t: 'mode', mode: 'live', canEdit: true });
 });

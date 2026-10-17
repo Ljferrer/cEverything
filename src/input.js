@@ -37,6 +37,20 @@ export function applySelection(bus, ev) {
   return ev;
 }
 
+/**
+ * Hold the last `type` payload emitted on `bus`, so a feature that subscribes
+ * after an await can apply a frame that arrived while it waited. The relay
+ * sends `mode` once per connection, and `net` connects before any feature
+ * installs, so laptop.js latches it across its async install probe.
+ * `last` is null until the first frame; `stop()` detaches the latch.
+ */
+export function latchLast(bus, type) {
+  const latch = { last: null, stop: () => bus.removeEventListener(type, keep) };
+  const keep = (e) => (latch.last = e.detail);
+  bus.addEventListener(type, keep);
+  return latch;
+}
+
 /** The Object3D to raycast for one entry of `allObelisks()`: the obelisk itself or the subtree it carries. */
 export function rootOf(obelisk) {
   if (!obelisk) return null;
