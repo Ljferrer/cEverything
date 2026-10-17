@@ -414,3 +414,59 @@ test('stop() closes the socket and schedules no retry', async () => {
   await sleep(200);
   assert.equal(g.calls('session.active_list').length, 1, 'no reconnect after stop');
 });
+
+test('an error state is recorded, so a later same-status update emits the recovered state', async () => {
+  const g = await gateway({ sessions: [session('s1', 'idle')] });
+  const { frames, until } = await startAgainst(g);
+  g.event('error', { session_id: 's1', message: 'boom' });
+  await until((fs) => fs.some((f) => f.t === 'state' && f.status === 'error'));
+  g.event('session.status', { session_id: 's1', status: 'idle' });
+  await until((fs) => fs.filter((f) => f.t === 'state').length === 3);
+  assert.deepEqual(frames.filter((f) => f.t === 'state').map((f) => f.status), ['idle', 'error', 'idle']);
+});
+
+test('a retry whose handshake fails without a close drops that socket before the next retry', async () => {
+  const sockets = new Set();
+  let lists = 0;
+  const g = await gateway({
+    sessions: [session('s1', 'idle')],
+    onRequest(msg, gw) {
+      sockets.add(gw.socket);
+      if (msg.method === 'session.active_list') {
+        lists += 1;
+        if (lists === 2) return { error: { code: -32000, message: 'listing failed' } };
+      }
+      return undefined;
+    },
+  });
+  const { frames, until } = await startAgainst(g, { env: { HERMES_RETRY_MS: '50' } });
+  const first = g.socket;
+  first.close();
+  await g.received('session.active_list', 3, 3000);
+  await g.received('client.capabilities', 3, 3000);
+  await sleep(100);
+  const [, second, third] = [...sockets];
+  assert.equal(sockets.size, 3, 'three connections');
+  assert.notEqual(third, second);
+  assert.equal(second.readyState, second.CLOSED, 'the socket of the failed handshake is closed');
+  const slabsBefore = frames.filter((f) => f.t === 'slab').length;
+  g.event('message.complete', { session_id: 's1', role: 'user', message_id: 'm9', content: 'once' });
+  await until((fs) => fs.filter((f) => f.t === 'slab').length > slabsBefore);
+  await sleep(50);
+  assert.equal(frames.filter((f) => f.t === 'slab' && f.id === 'm9').length, 1, 'the live socket is processed once');
+});
+
+test('start resolves before --seed finishes: a held prompt.submit reply never delays the handle', async () => {
+  const g = await gateway({
+    onRequest(msg) {
+      if (msg.method === 'session.create') return { result: { session_id: 'seed1' } };
+      if (msg.method === 'prompt.submit') return false;
+      return undefined;
+    },
+  });
+  const resolved = startAgainst(g, { argv: ['--seed', '1'], env: { HERMES_CONNECT_TIMEOUT_MS: '1000' } });
+  const handle = await Promise.race([resolved, sleep(900).then(() => null)]);
+  assert.ok(handle, 'start resolved while prompt.submit was still unanswered');
+  assert.equal(typeof handle.handle.stop, 'function');
+  await g.received('prompt.submit', 1);
+});
