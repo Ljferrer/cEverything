@@ -77,3 +77,20 @@ test('the say box target shows the obelisk title, else the sid', () => {
   bus.emit('select', { sid: '19f10a9b-gone', kind: 'base', slabId: null });
   assert.equal(node.textContent, 'to 19f10a9b-gone');
 });
+
+test('the say box target follows a retitle of the selected obelisk only', () => {
+  const bus = fakeBus();
+  const node = { textContent: 'select an obelisk' };
+  showTarget(bus, node, (sid) => ({ session: { sid, title: 'old title' } }));
+
+  bus.emit('session', { t: 'session', sid: 'a', title: 'before any select' });
+  assert.equal(node.textContent, 'select an obelisk');
+  bus.emit('select', { sid: 'a', kind: 'base', slabId: null });
+  assert.equal(node.textContent, 'to old title');
+  bus.emit('session', { t: 'session', sid: 'b', title: 'another chat' });
+  assert.equal(node.textContent, 'to old title');
+  bus.emit('session', { t: 'session', sid: 'a', title: 'new title' });
+  assert.equal(node.textContent, 'to new title');
+  bus.emit('session', { t: 'session', sid: 'a', title: '' });
+  assert.equal(node.textContent, 'to a');
+});

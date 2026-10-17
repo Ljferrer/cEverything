@@ -1,9 +1,10 @@
 // Pylons and projectiles (plan 4, PIN-2): four wireframe pylons at the compass
 // points, radius 5 m (PIN-51); a `tool` start fires a pooled sphere from the
 // calling slab (or the obelisk base) to the tool's pylon and lights the pylon
-// for 2 s (PIN-52, PIN-53, PIN-55); a filesystem `complete` writes the path and
-// `+n/-m` on the filesystem pylon (PIN-54). Frames for a sid with no obelisk
-// and for spawning tools are dropped (PIN-50). This is the only plan 4 file
+// for 2 s (PIN-52, PIN-53, PIN-55); a filesystem `complete` writes the file's
+// basename and `+n/-m` on the filesystem pylon (PIN-54); every label turns to
+// the camera each frame. Frames for a sid with no obelisk and for spawning
+// tools are dropped (PIN-50). This is the only plan 4 file
 // that adds objects to the scene (PIN-56); it never edits plan 1's files.
 import * as THREE from 'three';
 import { Text } from 'troika-three-text';
@@ -58,7 +59,7 @@ function makePylon(name) {
   g.add(label);
   const p = PLACE[name];
   g.position.set(p.x, 0, p.z);
-  g.lookAt(0, 0, 0); // troika text faces +z, so the labels face the room center
+  g.lookAt(0, 0, 0); // the labels sit on the face toward the room center; install turns them to the camera each frame
   return { group: g, box, label, glowUntil: -Infinity };
 }
 
@@ -84,7 +85,7 @@ export function install({ scene, bus, getObelisk = roomGetObelisk }) {
     pylons[name] = makePylon(name);
     group.add(pylons[name].group);
   }
-  // Second label on the filesystem pylon: the last completed path and +n/-m (PIN-54).
+  // Second label on the filesystem pylon: the last completed file's basename and +n/-m (PIN-54).
   const detail = makeLabel('', 0.14, PYLON_HEIGHT / 2, 'middle');
   detail.name = 'pylon:filesystem:detail';
   pylons.filesystem.group.add(detail);
