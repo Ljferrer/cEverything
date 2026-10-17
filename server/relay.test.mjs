@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { WebSocket } from 'ws';
-import { startRelay, parseArgs, VIEW_ONLY } from './relay.mjs';
+import { startRelay, parseArgs, resolvePort, VIEW_ONLY } from './relay.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const quiet = () => {};
@@ -99,6 +99,27 @@ test('the fixture holds every role and is valid protocol', async () => {
   const roles = new Set(frames.filter((f) => f.t === 'slab').map((f) => f.role));
   assert.deepEqual([...roles].sort(), ['assistant', 'thinking', 'tool', 'user']);
   assert.equal(new Set(frames.filter((f) => f.t === 'session').map((f) => f.sid)).size, 3);
+});
+
+test('the fixture carries one tool pair per pylon class, each start after its tool slab, a stray sid, and an Agent start', async () => {
+  const lines = (await readFile(path.join(HERE, '..', 'fixtures', 'synthetic.jsonl'), 'utf8')).split('\n').filter(Boolean);
+  const frames = lines.map((l) => JSON.parse(l));
+  const tools = frames.filter((f) => f.t === 'tool');
+  for (const name of ['web_search', 'write_file', 'terminal']) {
+    const start = tools.find((f) => f.name === name && f.phase === 'start');
+    const complete = tools.find((f) => f.name === name && f.phase === 'complete');
+    assert.ok(start && complete && start.id === complete.id, `${name} start/complete pair`);
+  }
+  const write = tools.filter((f) => f.name === 'write_file');
+  assert.equal(typeof write.find((f) => f.phase === 'start').args.path, 'string', 'write_file start carries args.path');
+  assert.match(write.find((f) => f.phase === 'complete').diff, /^--- .*\n\+\+\+ .*\n@@ /, 'write_file complete carries a unified diff');
+  const sids = new Set(frames.filter((f) => f.t === 'session').map((f) => f.sid));
+  for (const start of tools.filter((f) => f.phase === 'start' && sids.has(f.sid))) {
+    const slabAt = frames.findIndex((f) => f.t === 'slab' && f.role === 'tool' && f.sid === start.sid && f.id === start.id);
+    assert.ok(slabAt >= 0 && slabAt < frames.indexOf(start), `${start.name} ${start.id}: a role-tool slab of the same id comes before the start`);
+  }
+  assert.equal(tools.filter((f) => !sids.has(f.sid)).length, 1, 'exactly one tool frame names an undeclared sid');
+  assert.equal(tools.filter((f) => f.name === 'Agent' && f.phase === 'start').length, 1, 'one Agent start');
 });
 
 test('the slab cache keeps the last 200 per session and replays to a late client', async () => {
@@ -369,4 +390,69 @@ test('a late client gets session, then slabs in order, then state, per sid (PIN-
   assert.deepEqual(forL.slice(1, 3).map((x) => x.id), ['a', 'b']);
   assert.equal(forL.at(-1).status, 'waiting', 'only the last state is replayed');
   late.ws.close();
+});
+
+test('a stub x.test.mjs and an export-less helper.mjs beside the sources are skipped; the relay still starts', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'obelisks-stray-'));
+  await mkdir(path.join(dir, 'sources'));
+  const synthetic = pathToFileURL(path.join(HERE, 'sources', 'synthetic.mjs')).href;
+  await writeFile(path.join(dir, 'sources', 'synthetic.mjs'), `export * from ${JSON.stringify(synthetic)};\n`);
+  // Importing the test stub would throw: the loader must never touch it.
+  await writeFile(path.join(dir, 'sources', 'x.test.mjs'), `throw new Error('x.test.mjs was imported');\n`);
+  await writeFile(path.join(dir, 'sources', 'helper.mjs'), `// no exports\n`);
+  const logged = [];
+  const r = await relay({ sources: 'helper', sourcesDir: path.join(dir, 'sources'), log: (...a) => logged.push(a.join(' ')) });
+  assert.deepEqual([...r.sources.keys()], ['synthetic']);
+  assert.ok(logged.some((l) => l.includes('helper') && l.includes('no start')), `helper logged at load time: ${logged}`);
+  assert.ok(logged.some((l) => l.includes('no source module: helper')));
+  assert.ok(logged.every((l) => !l.includes('x.test')), 'the test stub is never mentioned');
+});
+
+test('a command module without both name and handle is skipped and never registers a phantom command', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'obelisks-phantom-'));
+  await mkdir(path.join(dir, 'commands'));
+  await writeFile(path.join(dir, 'commands', 'say.mjs'), `export const name = 'say';\nexport async function handle() { return { t: 'state', sid: 'syn-a', status: 'working' }; }\n`);
+  await writeFile(path.join(dir, 'commands', 'fork.mjs'), `export async function handle() {}\n`); // no name
+  await writeFile(path.join(dir, 'commands', 'pipe.mjs'), `export const name = 'pipe';\n`); // no handle
+  await writeFile(path.join(dir, 'commands', 'util.mjs'), `export const clamp = (n) => n;\n`); // neither
+  const logged = [];
+  const r = await relay({ commandsDir: path.join(dir, 'commands'), log: (...a) => logged.push(a.join(' ')) });
+  assert.deepEqual(Object.keys(r.commands), ['say']);
+  for (const f of ['fork', 'pipe', 'util']) assert.ok(logged.some((l) => l.includes(f) && l.includes('skipped')), `${f} logged: ${logged}`);
+  const c = connect(r, '?key=edit');
+  await c.until((f) => f.length >= 1);
+  c.send({ t: 'fork', sid: 'syn-a' });
+  await c.until((f) => f.some((x) => x.t === 'error' && x.text === 'no command: fork'));
+  c.ws.close();
+});
+
+test('resolvePort: --port wins, else OBELISKS_PORT, else 8787', () => {
+  assert.equal(resolvePort(9000, { OBELISKS_PORT: '1' }), 9000);
+  assert.equal(resolvePort(0, { OBELISKS_PORT: '1' }), 0);
+  assert.equal(resolvePort(undefined, { OBELISKS_PORT: '4321' }), 4321);
+  assert.equal(resolvePort(undefined, { OBELISKS_PORT: '0' }), 0);
+  assert.equal(resolvePort(undefined, {}), 8787);
+  assert.equal(resolvePort(undefined, { OBELISKS_PORT: '' }), 8787);
+});
+
+test('OBELISKS_PORT=0 with no --port yields a free port from the CLI', async () => {
+  const child = spawn(process.execPath, [path.join(HERE, 'relay.mjs'), '--source', 'synthetic'], {
+    stdio: ['ignore', 'ignore', 'pipe'],
+    env: { ...process.env, OBELISKS_PORT: '0' },
+  });
+  let err = '';
+  const listening = new Promise((resolve, reject) => {
+    child.stderr.on('data', (d) => {
+      err += d;
+      const m = err.match(/listening on (\d+), mode (\w+)/);
+      if (m) resolve(Number(m[1]));
+    });
+    child.on('exit', (code) => reject(new Error(`relay exited ${code}: ${err}`)));
+  });
+  try {
+    const port = await listening;
+    assert.ok(port > 0 && port !== 8787, `free port, got ${port}`);
+  } finally {
+    child.kill();
+  }
 });
