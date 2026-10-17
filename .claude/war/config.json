@@ -1,12 +1,12 @@
 {
   "version": 1,
-  "profile": "balanced",
+  "profile": "economy",
   "agents": {
     "worker": {
-      "model": "fable",
+      "model": "opus",
       "effort": "default",
       "docs": {
-        "model": "fable",
+        "model": "opus",
         "effort": "default"
       },
       "fix": {
@@ -15,8 +15,8 @@
       }
     },
     "auditor": {
-      "model": "opus",
-      "effort": "high"
+      "model": "sonnet",
+      "effort": "xhigh"
     },
     "refiner": {
       "model": "sonnet",
@@ -28,11 +28,11 @@
     },
     "servitor": {
       "model": "sonnet",
-      "effort": "xhigh"
+      "effort": "high"
     },
     "redteam": {
-      "model": "opus",
-      "effort": "high"
+      "model": "sonnet",
+      "effort": "default"
     },
     "snipe": {
       "model": "opus",
@@ -54,11 +54,7 @@
         "depth": "deep"
       },
       {
-        "lens": "simplicity",
-        "depth": "deep"
-      },
-      {
-        "lens": "performance",
+        "lens": "security",
         "depth": "deep"
       }
     ],
@@ -66,10 +62,10 @@
     "autoEscalate": true
   },
   "run": {
-    "roundLimit": 6,
+    "roundLimit": 4,
     "absorbRounds": 6,
-    "redteamRoundLimit": 3,
-    "afk": false,
+    "redteamRoundLimit": 2,
+    "afk": true,
     "ace": true,
     "provision": [],
     "provisionSource": "none",
