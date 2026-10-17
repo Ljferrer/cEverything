@@ -2,7 +2,8 @@
 // a vertical stack of message slabs, newest on top. Each frame `update(camera)`
 // picks a LOD band per slab (PIN-13) and shows full text, the mid summary, or a
 // role-colored bar. Slabs stack by measured height (src/stack.js): troika lays
-// text out asynchronously, so every `sync` re-runs the layout when it completes.
+// text out asynchronously, so every `sync` re-runs the layout when it completes,
+// and every band change with unchanged text re-runs it at once.
 // `setState` and `setBeacon` are the plan 6 seams.
 //
 // Pick targets (PIN-22): every slab mesh carries userData {sid, slabId} and the
@@ -185,6 +186,8 @@ export class Obelisk extends THREE.Group {
     if (slab.text.text !== want) {
       slab.text.text = want;
       slab.text.sync(() => this.#layoutStack());
+    } else {
+      this.#layoutStack(); // same text, new band: a far bar may have just become this text again
     }
   }
 
