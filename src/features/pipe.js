@@ -6,11 +6,12 @@
 // (or the source base when that slab is gone) to the target base (PIN-72).
 // `getObelisk` comes from `ctx.getObelisk` (a test's fake) or room.js on first
 // use, so node tests never load room.js (PIN-80).
+// fork.js must install before pipe.js (filename order in main.js): this feature clears bus.selectedSlab after a pipe, and fork.js would read the cleared slab as a fork.
 import * as THREE from 'three';
 import { decide } from '../gesture.js';
 import { colorFor } from '../colors.js';
 
-export const LINE_MS = 1000;
+const LINE_MS = 1000;
 
 const baseOf = (obelisk) => obelisk?.children?.find((c) => c.userData?.kind === 'base') ?? null;
 

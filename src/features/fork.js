@@ -8,7 +8,7 @@
 // room.js places it.
 import { decide } from '../gesture.js';
 
-export const THROTTLE_MS = 1000;
+const THROTTLE_MS = 1000;
 
 export function install({ bus, net }) {
   let canEdit = false;
@@ -23,7 +23,7 @@ export function install({ bus, net }) {
     const payload = e.detail;
     const cmd = decide(payload, bus.selectedSlab, bus.talking ?? null, bus.beacons?.has(payload.sid) ?? false);
     if (!cmd) {
-      if (payload?.kind !== 'base') return;
+      if (payload.kind !== 'base') return;
       if (bus.talking === payload.sid) console.log(`fork: suppressed talking ${payload.sid}`);
       else if (bus.beacons?.has(payload.sid)) console.log(`fork: suppressed acknowledge ${payload.sid}`);
       return;

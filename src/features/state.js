@@ -9,7 +9,7 @@
 import { beaconNext } from '../gesture.js';
 import { stateColor } from '../colors.js';
 
-export const PULSE_MS = 1000;
+const PULSE_MS = 1000;
 const PULSING = new Set(['working', 'streaming']);
 
 const baseOf = (obelisk) => obelisk?.children?.find((c) => c.userData?.kind === 'base') ?? null;
