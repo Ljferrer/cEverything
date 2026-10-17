@@ -73,6 +73,7 @@ test('ES4 two say calls inside one millisecond get distinct slab ids', async () 
     await say.handle({ t: 'say', sid: 'a', text: 'one' }, ctx);
     await say.handle({ t: 'say', sid: 'a', text: 'two' }, ctx);
     assert.equal(emitted.length, 2);
+    assert.ok(emitted.every(isServerEvent), JSON.stringify(emitted));
     assert.deepEqual(
       emitted.map((f) => f.ts),
       [1000, 1000],
@@ -148,6 +149,8 @@ test('ES10 pipe prefers the owner slabText over the relay cache', async () => {
   owners.s1.slabText = (sid, id) => (sid === 's1' && id === 'm1' ? 'from memory' : '');
   await pipe.handle({ t: 'pipe', from: 's1', to: 's2', slab: 'm1' }, ctx);
   assert.equal(emitted[0].text, 'From S1: from memory');
+  assert.ok(emitted.every(isServerEvent), JSON.stringify(emitted));
   const missing = await pipe.handle({ t: 'pipe', from: 's1', to: 's2', slab: 'nope' }, ctx);
   assert.deepEqual(missing, { t: 'error', text: 'slab not found' });
+  assert.equal(emitted.length, 1);
 });
