@@ -108,7 +108,6 @@ export async function start({ emit, argv = process.argv, env = process.env } = {
   let i = 0;
   const tick = () => {
     if (!running) return;
-    if (i >= entries.length) return stop();
     const { frame } = entries[i];
     i += 1;
     remember(frame);

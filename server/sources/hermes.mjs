@@ -335,7 +335,7 @@ function completeFrame(sid, id, role, full) {
   openSlab.delete(`${sid}/${role}`);
   const known = slabs.get(sid)?.get(id);
   if (known === undefined) return openSlabFrame(sid, id, role, full);
-  const tail = full.startsWith(known) ? full.slice(known.length) : full.length > known.length ? full.slice(known.length) : '';
+  const tail = full.slice(known.length);
   if (tail) {
     remember(sid, id, known + tail);
     emit({ t: 'delta', sid, id, role, text: tail });
