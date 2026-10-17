@@ -24,7 +24,8 @@ registerHooks({
   },
 });
 
-const { showErrors, showTarget, ERROR_MS } = await import('./laptop.js');
+const { showErrors, showTarget, ERROR_MS, LAPTOP_START } = await import('./laptop.js');
+const { RING_RADIUS, CHILD_RADIUS } = await import('./room.js');
 
 function fakeBus() {
   const bus = Object.assign(new EventTarget(), { selected: null, selectedSlab: null, talking: null });
@@ -93,4 +94,11 @@ test('the say box target follows a retitle of the selected obelisk only', () => 
   assert.equal(node.textContent, 'to new title');
   bus.emit('session', { t: 'session', sid: 'a', title: '' });
   assert.equal(node.textContent, 'to a');
+});
+
+test('the laptop camera starts outside the ring, its child rings, and the pylons, above the floor', () => {
+  const [x, y, z] = LAPTOP_START;
+  const outer = Math.max(RING_RADIUS + CHILD_RADIUS + 1.5, 5); // child ring edge plus the near-text band; pylons stand at 5 m
+  assert.ok(Math.hypot(x, z) > outer, `start ${Math.hypot(x, z).toFixed(2)} m from the center, need more than ${outer} m`);
+  assert.ok(y > 1.6, 'above eye height so the room reads from above');
 });
