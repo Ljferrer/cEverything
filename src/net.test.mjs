@@ -56,13 +56,13 @@ test('a viewer net gets canEdit:false and the view-only error', async () => {
   assert.equal(err.text, 'view-only link');
 });
 
-test('a latch set before createNet holds the per-connection mode frame for a feature that installs later', async () => {
+test('a latch set in the connect turn holds the per-connection mode frame for a feature that installs later', async () => {
   const r = await startRelay({ port: 0, sources: ['synthetic'], log: () => {} });
   relays.push(r);
   const bus = createBus();
-  // Same order as main.js and laptop.js: latch, connect, then an unbounded install probe.
-  const latched = latchLast(bus, 'mode');
+  // Same order as main.js: connect, then laptop.js latches in the same turn, before any socket message.
   openNet(bus, `ws://127.0.0.1:${r.port}/relay?key=edit`);
+  const latched = latchLast(bus, 'mode');
   await once(bus, 'mode');
   // The probe resolves after the frame; a listener added now would never see it.
   let lateSaw = null;

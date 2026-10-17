@@ -55,7 +55,8 @@ export function install({ scene, camera, renderer, bus }) {
 }
 
 // In-scene mode label at the room origin, above the obelisk ring, facing the
-// camera (PIN-5). Empty while live; the laptop DOM label mirrors the same event.
+// camera (PIN-5). Reads LIVE, REPLAY or SYNTHETIC; the laptop DOM label mirrors
+// the same event.
 function installModeLabel({ scene, camera, bus }) {
   const label = new Text();
   label.text = '';
@@ -69,7 +70,7 @@ function installModeLabel({ scene, camera, bus }) {
   scene.add(label);
   bus.addEventListener('mode', (e) => {
     const mode = e.detail.mode;
-    label.text = mode === 'live' ? '' : mode.toUpperCase();
+    label.text = mode.toUpperCase();
     label.sync();
   });
   bus.addEventListener('frame', () => label.lookAt(camera.position));
