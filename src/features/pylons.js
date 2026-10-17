@@ -101,8 +101,9 @@ export function install({ scene, bus }) {
     if (frame.phase === 'start') {
       remember(frame.id, frame.args);
       const now = Date.now();
-      // A slab older than the visible window keeps a stale position, so a
-      // hidden slab falls back to the base like a missing one does.
+      // A slab past plan 1's MAX_VISIBLE cap is hidden and keeps a stale
+      // position (obelisk.js #layoutStack), so a hidden slab takes PIN-55's
+      // own base fallback, like a missing slab does.
       const slab = obelisk.slabs?.find((s) => s.slabId === frame.id);
       const launch = slab && slab.visible ? slab : baseOf(obelisk);
       launch.getWorldPosition(_from);
