@@ -8,17 +8,20 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import QRCode from 'qrcode';
-import { allObelisks, getObelisk as roomGetObelisk } from './room.js';
+import { allObelisks, getObelisk } from './room.js';
 import { hitToEvent, applySelection, rootOf, shouldInstallLaptop, latchLast } from '../input.js';
 
 export const ERROR_MS = 4000;
 
-/** The say box target line shows the selected obelisk's title, else its sid. */
-export function showTarget(bus, node, getObelisk) {
+/** The say box target line shows the selected obelisk's title, else its sid, and follows a later retitle. */
+export function showTarget(bus, node, findObelisk) {
+  let sid = null;
+  const render = (title) => (node.textContent = `to ${title || sid}`);
   bus.addEventListener('select', (e) => {
-    const { sid } = e.detail;
-    node.textContent = `to ${getObelisk(sid)?.session?.title || sid}`;
+    sid = e.detail.sid;
+    render(findObelisk(sid)?.session?.title);
   });
+  bus.addEventListener('session', (e) => e.detail?.sid === sid && render(e.detail.title));
 }
 
 /** Each relay `error` frame shows its text in `node` for ERROR_MS, so a failed say, fork or pipe is visible. */
@@ -42,7 +45,7 @@ export function viewLink(loc = location) {
 // is async, so main.js runs on and this feature joins once it resolves. The
 // relay's single per-connection `mode` frame can land during that wait (net
 // connected first), so `latchLast` holds it for the label and the say box.
-export async function install({ camera, renderer, bus, net, getObelisk = roomGetObelisk }) {
+export async function install({ camera, renderer, bus, net }) {
   const latchedMode = latchLast(bus, 'mode');
   if (!(await shouldInstallLaptop())) return latchedMode.stop();
 
@@ -79,14 +82,13 @@ export async function install({ camera, renderer, bus, net, getObelisk = roomGet
       #say-box button { align-self: flex-end; background: #222; color: #eee; border: 1px solid #666; border-radius: 4px; padding: 4px 14px; font: inherit; cursor: pointer; }
       #say-box .target { color: #999; }
       #say-box .error { color: #ff7766; }
-      #say-box .error[hidden] { display: none; }
       #share-panel { right: 12px; bottom: 12px; text-align: center; }
       #share-panel canvas { display: block; margin: 0 auto 4px; background: #fff; }
       #share-panel .link { max-width: 180px; word-break: break-all; color: #999; font-size: 11px; }
       /* Phone width: a small QR in the top right corner, clear of the bottom-center VR button. */
-      @media (max-width: 599px) {
+      @media (width < 600px) {
         #share-panel { top: 12px; bottom: auto; padding: 4px; }
-        #share-panel canvas { width: 96px !important; height: 96px !important; }
+        #share-panel canvas { width: 96px !important; height: 96px !important; image-rendering: pixelated; }
         #share-panel .link { max-width: 96px; font-size: 9px; }
       }
     </style>

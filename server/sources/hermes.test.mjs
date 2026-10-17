@@ -291,17 +291,18 @@ test('ES13b gateway.ready never arrives: start rejects at the connect timeout', 
   assert.ok(took >= 150 && took < 2000, `took ${took} ms`);
 });
 
-test('a gateway that greets and never answers session.active_list: start rejects at the start timeout and drops the socket', async () => {
+test('ES13c gateway.ready arrives but session.active_list never answers: start rejects at the handshake timeout and closes the socket (#36)', async () => {
   const g = await gateway({ onRequest: (msg) => (msg.method === 'session.active_list' ? false : undefined) });
+  gateways.push(g);
   const t0 = Date.now();
   await assert.rejects(
-    hermes.start({ emit: () => {}, argv: [], env: { ...g.env(), HERMES_START_TIMEOUT_MS: '300' } }),
-    /no first attach within 300 ms/,
+    hermes.start({ emit: () => {}, argv: [], env: { ...g.env(), HERMES_HANDSHAKE_TIMEOUT_MS: '300' } }),
+    /no handshake reply within 300 ms/,
   );
   const took = Date.now() - t0;
   assert.ok(took >= 250 && took < 2000, `took ${took} ms`);
+  assert.equal(g.calls('session.active_list').length, 1);
   await new Promise((resolve) => (g.socket.readyState === g.socket.CLOSED ? resolve() : g.socket.once('close', resolve)));
-  assert.equal(hermes.DEFAULT_START_TIMEOUT_MS, 15000);
 });
 
 test('ES14 session.history seeds one user and one assistant slab and drops the tool-role message', async () => {

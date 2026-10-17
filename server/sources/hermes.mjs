@@ -5,10 +5,10 @@
 //
 // Start contract (PIN-31): `start` rejects when the first connect fails or
 // `gateway.ready` is late (HERMES_CONNECT_TIMEOUT_MS, default 3000 ms), so the
-// relay skips this source and falls back to synthetic. It also rejects when the
-// first handshake (capabilities, list, attach) outlasts HERMES_START_TIMEOUT_MS
-// (default 15000 ms), so a host that greets and then hangs cannot keep the
-// relay from listening. After the capabilities
+// relay skips this source and falls back to synthetic. It also rejects when
+// the first handshake (capabilities, list, attach) outlasts
+// HERMES_HANDSHAKE_TIMEOUT_MS (default 15000 ms), so a host that greets and
+// then hangs cannot keep the relay from listening (#36). After the capabilities
 // ack and the first `session.active_list` attach it resolves to `{stop()}`;
 // only then does a socket close start the background retry every 5 s
 // (HERMES_RETRY_MS shortens it for tests).
@@ -24,7 +24,7 @@ import { WebSocket } from 'ws';
 
 export const DEFAULT_WS_URL = 'ws://127.0.0.1:9119/api/ws';
 export const DEFAULT_CONNECT_TIMEOUT_MS = 3000;
-export const DEFAULT_START_TIMEOUT_MS = 15000;
+export const DEFAULT_HANDSHAKE_TIMEOUT_MS = 15000;
 export const RETRY_MS = 5000;
 export const ECHO_WINDOW_MS = 3000;
 /** Scripted seed prompts (PIN-33), aimed at web_search, write_file, and terminal in turn. */
@@ -575,9 +575,9 @@ export async function stop() {
  * Connect to the Hermes gateway, attach every active session, and resolve to
  * `{stop}`; `--seed N` then seeds N sessions in the background, off the
  * resolve path, so a slow `prompt.submit` never delays the relay's listen.
- * Rejects when the host does not answer within the connect timeout, or the
- * first attach outlasts the start timeout, so the relay falls back to
- * synthetic (PIN-31).
+ * Rejects when the host does not answer within the connect timeout, or does
+ * not finish the first handshake within the handshake timeout, so the relay
+ * falls back to synthetic (PIN-31, #36).
  * The relay's own `sendCommand` argument (a client-command router) is not
  * used: command modules reach this source through the exported `sendCommand`.
  */
@@ -587,13 +587,13 @@ export async function start({ emit: emitFn, argv = process.argv, env = process.e
   stopped = false;
   currentEnv = env;
   const sock = await connect(env);
-  const startMs = Number(env.HERMES_START_TIMEOUT_MS ?? DEFAULT_START_TIMEOUT_MS) || DEFAULT_START_TIMEOUT_MS;
+  const handshakeMs = Number(env.HERMES_HANDSHAKE_TIMEOUT_MS ?? DEFAULT_HANDSHAKE_TIMEOUT_MS) || DEFAULT_HANDSHAKE_TIMEOUT_MS;
   let deadline;
   try {
     await Promise.race([
       handshake(sock),
       new Promise((_, reject) => {
-        deadline = setTimeout(() => reject(new Error(`no first attach within ${startMs} ms`)), startMs);
+        deadline = setTimeout(() => reject(new Error(`no handshake reply within ${handshakeMs} ms`)), handshakeMs);
       }),
     ]);
   } catch (err) {
