@@ -26,7 +26,7 @@ metadata:
     - teardown
   created: 2026-10-17
   originSessionId: 58cf8bf7-7773-43a0-b2c1-98d7dfb2866b
-  modified: 2026-10-17T22:05:09.046Z
+  modified: 2026-10-17T23:02:10.579Z
 ---
 
 **The seam mismatch.** Plan 1's `startRelay` in `server/relay.mjs` awaits `mod.start(...)` and throws the result away. Its `close()` calls `await mod.stop?.()` on the module. The header comment says a source "may export stop()". `server/sources/synthetic.mjs` does export `stop`.
@@ -38,6 +38,8 @@ metadata:
 **Where it will bite.** `DEFAULT_SOURCES` is `['hermes', 'claude']`. A later relay test on the default sources starts the claude source over the real transcript root. After `close()` the live timers keep the event loop open, and the test process hangs.
 
 **Fix shape.** Plan 3 could not edit plan 1 files (PIN-22), so the repair belongs inside the source. Keep a module-level `Set` of started handles. Add each handle in `start()` and remove it in its `stop()`. Add `export function stop() { for (const h of [...handles]) h.stop(); }`. Two audit seats suggested this. It was not applied before land.
+
+**Contrast, plan 2 phase 1.** `server/sources/hermes.mjs` does both. `start()` resolves to `{stop}` and the module also exports `stop()`, so `relay.close()` reaches it. `server/sources/replay.mjs` exports a module-level `stop()` and its `start()` returns nothing. The relay calls only the module-level `stop`, so that export is the one a new source must have. Grounding: read in the run's `_refinery` integration worktree (`<session-worktree>`), HEAD 4d680c9, the second parent of landed merge b5ba1bd on dev/obelisks-2.
 
 **Rule.** When a plan names a source seam as "returns a handle", check how the host calls it. Here the host calls the module, not the handle. The handle shape is a plan-text assumption, not what the relay does.
 
