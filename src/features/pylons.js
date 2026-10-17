@@ -7,7 +7,7 @@
 // that adds objects to the scene (PIN-56); it never edits plan 1's files.
 import * as THREE from 'three';
 import { Text } from 'troika-three-text';
-import { getObelisk } from './room.js';
+import { getObelisk as roomGetObelisk } from './room.js';
 import { PYLONS, pylonFor, shouldFire, diffCounts } from '../pylon-map.js';
 import { createPool } from '../projectile.js';
 
@@ -54,11 +54,18 @@ function makePylon(name) {
   box.position.y = PYLON_HEIGHT / 2;
   box.userData = { kind: 'pylon', pylon: name };
   g.add(box);
-  g.add(makeLabel(name, 0.24, PYLON_HEIGHT + 0.1, 'bottom'));
+  const label = makeLabel(name, 0.24, PYLON_HEIGHT + 0.1, 'bottom');
+  g.add(label);
   const p = PLACE[name];
   g.position.set(p.x, 0, p.z);
   g.lookAt(0, 0, 0); // troika text faces +z, so the labels face the room center
-  return { group: g, box, glowUntil: -Infinity };
+  return { group: g, box, label, glowUntil: -Infinity };
+}
+
+/** The filesystem detail text (PIN-54): the file's basename and `+n/-m`, short enough to fit the pylon. */
+export function detailText(path, added, removed) {
+  const name = String(path).split(/[\\/]/).pop();
+  return `${name}\n+${added}/-${removed}`;
 }
 
 /** The base mesh under an obelisk (`Obelisk#base`), or the obelisk itself. */
@@ -66,12 +73,12 @@ function baseOf(obelisk) {
   return obelisk.base ?? obelisk;
 }
 
-export function install({ scene, bus }) {
+export function install({ scene, bus, getObelisk = roomGetObelisk }) {
   const group = new THREE.Group();
   group.name = 'pylons';
   scene.add(group);
 
-  /** @type {Record<string, {group: THREE.Group, box: THREE.Mesh, glowUntil: number}>} */
+  /** @type {Record<string, {group: THREE.Group, box: THREE.Mesh, label: Text, glowUntil: number}>} */
   const pylons = {};
   for (const name of PYLONS) {
     pylons[name] = makePylon(name);
@@ -79,14 +86,21 @@ export function install({ scene, bus }) {
   }
   // Second label on the filesystem pylon: the last completed path and +n/-m (PIN-54).
   const detail = makeLabel('', 0.14, PYLON_HEIGHT / 2, 'middle');
+  detail.name = 'pylon:filesystem:detail';
   pylons.filesystem.group.add(detail);
+  // Every label turns to the camera each frame, so none reads mirrored from behind.
+  const labels = [detail, ...PYLONS.map((name) => pylons[name].label)];
 
   const pool = createPool({ THREE, parent: group });
   /** @type {Map<string, object>} `start` args by tool call id, until its `complete`. */
   const starts = new Map();
 
   bus.addEventListener('tool', (e) => onTool(e.detail));
-  bus.addEventListener('frame', () => tick(Date.now()));
+  bus.addEventListener('frame', (e) => {
+    tick(Date.now());
+    const camera = e.detail?.camera;
+    if (camera) for (const label of labels) label.lookAt(camera.position);
+  });
 
   function onTool(frame) {
     if (!frame || typeof frame !== 'object') return;
@@ -110,7 +124,7 @@ export function install({ scene, bus }) {
         const args = frame.args ?? starts.get(frame.id) ?? {};
         const path = args.path ?? args.file_path ?? '';
         const { added, removed } = diffCounts(frame.diff);
-        detail.text = `${path}\n+${added}/-${removed}`;
+        detail.text = detailText(path, added, removed);
         detail.sync();
       }
       starts.delete(frame.id);

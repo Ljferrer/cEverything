@@ -8,8 +8,29 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import QRCode from 'qrcode';
-import { allObelisks } from './room.js';
+import { allObelisks, getObelisk as roomGetObelisk } from './room.js';
 import { hitToEvent, applySelection, rootOf, shouldInstallLaptop, latchLast } from '../input.js';
+
+export const ERROR_MS = 4000;
+
+/** The say box target line shows the selected obelisk's title, else its sid. */
+export function showTarget(bus, node, getObelisk) {
+  bus.addEventListener('select', (e) => {
+    const { sid } = e.detail;
+    node.textContent = `to ${getObelisk(sid)?.session?.title || sid}`;
+  });
+}
+
+/** Each relay `error` frame shows its text in `node` for ERROR_MS, so a failed say, fork or pipe is visible. */
+export function showErrors(bus, node) {
+  let timer;
+  bus.addEventListener('error', (e) => {
+    node.textContent = e.detail?.text ?? 'error';
+    node.hidden = false;
+    clearTimeout(timer);
+    timer = setTimeout(() => (node.hidden = true), ERROR_MS);
+  });
+}
 
 /** The view link the QR code carries: `?share=<url>` when set, else the bare origin (never the edit key). */
 export function viewLink(loc = location) {
@@ -21,7 +42,7 @@ export function viewLink(loc = location) {
 // is async, so main.js runs on and this feature joins once it resolves. The
 // relay's single per-connection `mode` frame can land during that wait (net
 // connected first), so `latchLast` holds it for the label and the say box.
-export async function install({ camera, renderer, bus, net }) {
+export async function install({ camera, renderer, bus, net, getObelisk = roomGetObelisk }) {
   const latchedMode = latchLast(bus, 'mode');
   if (!(await shouldInstallLaptop())) return latchedMode.stop();
 
@@ -57,13 +78,22 @@ export async function install({ camera, renderer, bus, net }) {
       #say-box textarea { width: 100%; box-sizing: border-box; min-height: 56px; background: #111; color: #eee; border: 1px solid #555; border-radius: 4px; padding: 6px; font: inherit; resize: vertical; }
       #say-box button { align-self: flex-end; background: #222; color: #eee; border: 1px solid #666; border-radius: 4px; padding: 4px 14px; font: inherit; cursor: pointer; }
       #say-box .target { color: #999; }
+      #say-box .error { color: #ff7766; }
+      #say-box .error[hidden] { display: none; }
       #share-panel { right: 12px; bottom: 12px; text-align: center; }
       #share-panel canvas { display: block; margin: 0 auto 4px; background: #fff; }
       #share-panel .link { max-width: 180px; word-break: break-all; color: #999; font-size: 11px; }
+      /* Phone width: a small QR in the top right corner, clear of the bottom-center VR button. */
+      @media (max-width: 599px) {
+        #share-panel { top: 12px; bottom: auto; padding: 4px; }
+        #share-panel canvas { width: 96px !important; height: 96px !important; }
+        #share-panel .link { max-width: 96px; font-size: 9px; }
+      }
     </style>
     <div id="mode-label"></div>
     <div id="say-box" hidden>
       <div class="target">select an obelisk</div>
+      <div class="error" hidden></div>
       <textarea placeholder="say to the selected obelisk"></textarea>
       <button type="button">Send</button>
     </div>
@@ -87,7 +117,8 @@ export async function install({ camera, renderer, bus, net }) {
   const target = sayBox.querySelector('.target');
   const textarea = sayBox.querySelector('textarea');
   const sendButton = sayBox.querySelector('button');
-  bus.addEventListener('select', (e) => (target.textContent = `to ${e.detail.sid}`));
+  showTarget(bus, target, getObelisk);
+  showErrors(bus, sayBox.querySelector('.error'));
   function send() {
     const text = textarea.value.trim();
     if (!text || !bus.selected) return;
