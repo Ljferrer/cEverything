@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import QRCode from 'qrcode';
 import { allObelisks } from './room.js';
-import { hitToEvent, applySelection, rootOf, shouldInstallLaptop } from '../input.js';
+import { hitToEvent, applySelection, rootOf, shouldInstallLaptop, latchLast } from '../input.js';
 
 /** The view link the QR code carries: `?share=<url>` when set, else the bare origin (never the edit key). */
 export function viewLink(loc = location) {
@@ -18,9 +18,12 @@ export function viewLink(loc = location) {
 
 // Installs on `?mode=laptop`, without `navigator.xr`, or when immersive-vr is
 // unsupported (the phone view); see `shouldInstallLaptop` in input.js. The probe
-// is async, so main.js runs on and this feature joins once it resolves.
+// is async, so main.js runs on and this feature joins once it resolves. The
+// relay's single per-connection `mode` frame can land during that wait (net
+// connected first), so `latchLast` holds it for the label and the say box.
 export async function install({ camera, renderer, bus, net }) {
-  if (!(await shouldInstallLaptop())) return;
+  const latchedMode = latchLast(bus, 'mode');
+  if (!(await shouldInstallLaptop())) return latchedMode.stop();
 
   // Orbit camera; OrbitControls handles touch (one finger rotates, two pan and zoom).
   const controls = new OrbitControls(camera, renderer.domElement);
@@ -68,13 +71,17 @@ export async function install({ camera, renderer, bus, net }) {
   document.body.appendChild(ui);
 
   // LIVE / REPLAY / SYNTHETIC from the relay's mode event (PIN-5); the box
-  // hides while canEdit is false (PIN-23).
+  // hides while canEdit is false (PIN-23). A frame latched during the install
+  // probe is applied once here, then the live listener takes over.
   const modeLabel = ui.querySelector('#mode-label');
   const sayBox = ui.querySelector('#say-box');
-  bus.addEventListener('mode', (e) => {
-    modeLabel.textContent = e.detail.mode.toUpperCase();
-    sayBox.hidden = !e.detail.canEdit;
-  });
+  const applyMode = ({ mode, canEdit }) => {
+    modeLabel.textContent = mode.toUpperCase();
+    sayBox.hidden = !canEdit;
+  };
+  bus.addEventListener('mode', (e) => applyMode(e.detail));
+  if (latchedMode.last) applyMode(latchedMode.last);
+  latchedMode.stop();
 
   // The text box sends `say` for the selected obelisk.
   const target = sayBox.querySelector('.target');
