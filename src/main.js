@@ -52,6 +52,8 @@ const clock = new THREE.Clock();
 renderer.setAnimationLoop((now) => {
   const dt = clock.getDelta();
   bus.emit('frame', { dt, camera, renderer });
-  for (const cb of frameCallbacks) cb(dt, now);
+  for (const cb of frameCallbacks) {
+    try { cb(dt, now); } catch (err) { console.error('[onFrame]', err); }
+  }
   renderer.render(scene, camera);
 });
