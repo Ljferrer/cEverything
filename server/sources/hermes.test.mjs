@@ -501,7 +501,7 @@ test('a retry whose connect fails after a new start leaves the new run\'s socket
   await startAgainst(g1, { env: { HERMES_RETRY_MS: '50', HERMES_CONNECT_TIMEOUT_MS: '300' } });
   g1.holdReady = true;
   g1.socket.close();
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await sleep(100);
   assert.equal(g1.held.length, 1, 'the retry is connecting while gateway.ready is held');
   const g2 = await gateway({ sessions: [session('s2', 'idle')] });
   const { frames, until } = await startAgainst(g2);
@@ -519,7 +519,7 @@ test('a retry whose connect succeeds after a new start closes that late socket a
   await startAgainst(g1, { env: { HERMES_RETRY_MS: '50' } });
   g1.holdReady = true;
   g1.socket.close();
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  await sleep(100);
   assert.equal(g1.held.length, 1, 'the retry is connecting while gateway.ready is held');
   const g2 = await gateway({ sessions: [session('s2', 'idle')] });
   const { frames, until } = await startAgainst(g2);
@@ -534,6 +534,29 @@ test('a retry whose connect succeeds after a new start closes that late socket a
   g2.event('message.complete', { session_id: 's2', role: 'user', message_id: 'm3', content: 'still here' });
   await until((fs) => fs.some((f) => f.t === 'slab' && f.id === 'm3'));
   assert.equal(frames.filter((f) => f.t === 'slab' && f.id === 'm3').length, 1);
+});
+
+test('a retry still in its attach loop when a new start runs leaks no sid of the earlier gateway into the new run', async () => {
+  let resumes = 0;
+  const g1 = await gateway({
+    sessions: [session('a1', 'idle'), session('a2', 'idle')],
+    onRequest(msg) {
+      // The first start resumes a1 and a2; the retry's resume of a1 is held, so its loop stops before a2.
+      if (msg.method !== 'session.resume') return undefined;
+      resumes += 1;
+      return resumes === 3 ? false : undefined;
+    },
+  });
+  await startAgainst(g1, { env: { HERMES_RETRY_MS: '50' } });
+  g1.socket.close();
+  await g1.received('session.resume', 3, 3000);
+  const g2 = await gateway({ sessions: [session('b1', 'idle')] });
+  const { frames, until } = await startAgainst(g2);
+  await until((fs) => fs.some((f) => f.t === 'state' && f.sid === 'b1'));
+  await sleep(100);
+  assert.deepEqual([...new Set(frames.map((f) => f.sid))], ['b1'], 'the new run carries no sid from the first gateway');
+  assert.equal(g2.calls('session.resume').length, 1, 'the earlier run\'s loop sends nothing on the new socket');
+  assert.equal(hermes.titleOf('a2'), '', 'the new run\'s table holds no earlier-run sid');
 });
 
 test('start resolves before --seed finishes: a held prompt.submit reply never delays the handle', async () => {
