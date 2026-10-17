@@ -43,3 +43,19 @@ export function rootOf(obelisk) {
   if (obelisk.isObject3D) return obelisk;
   return obelisk.group ?? obelisk.root ?? null;
 }
+
+/**
+ * The laptop.js install gate (PIN-7). True on `?mode=laptop`, when `navigator.xr`
+ * is absent, or when `isSessionSupported('immersive-vr')` resolves false or
+ * rejects. The last arm is the phone view: Chrome exposes `navigator.xr`
+ * without immersive-vr, so the orbit camera with touch installs there.
+ */
+export async function shouldInstallLaptop(loc = location, nav = navigator) {
+  if (new URLSearchParams(loc.search).get('mode') === 'laptop') return true;
+  if (!nav.xr) return true;
+  try {
+    return !(await nav.xr.isSessionSupported('immersive-vr'));
+  } catch {
+    return true;
+  }
+}

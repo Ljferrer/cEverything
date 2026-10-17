@@ -1,24 +1,26 @@
 // Laptop and phone mode (PIN-7): the same bundle with an orbit camera, click
 // or tap to select through input.js, a text box that sends `say` to the
 // selected obelisk (hidden on a view-only link, PIN-23), a DOM mode label,
-// and a corner Share panel with a QR code of the view link (PIN-24).
+// and a corner Share panel with a QR code of the view link (PIN-24). The
+// select path publishes the same `select` event and sets `bus.selected` (the
+// sid string) and `bus.selectedSlab` exactly as xr.js does, through
+// `applySelection`.
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import QRCode from 'qrcode';
 import { allObelisks } from './room.js';
-import { hitToEvent, applySelection, rootOf } from '../input.js';
-
-export function isLaptop(loc = location, nav = navigator) {
-  return new URLSearchParams(loc.search).get('mode') === 'laptop' || !nav.xr;
-}
+import { hitToEvent, applySelection, rootOf, shouldInstallLaptop } from '../input.js';
 
 /** The view link the QR code carries: `?share=<url>` when set, else the bare origin (never the edit key). */
 export function viewLink(loc = location) {
   return new URLSearchParams(loc.search).get('share') ?? loc.origin;
 }
 
-export function install({ camera, renderer, bus, net }) {
-  if (!isLaptop()) return;
+// Installs on `?mode=laptop`, without `navigator.xr`, or when immersive-vr is
+// unsupported (the phone view); see `shouldInstallLaptop` in input.js. The probe
+// is async, so main.js runs on and this feature joins once it resolves.
+export async function install({ camera, renderer, bus, net }) {
+  if (!(await shouldInstallLaptop())) return;
 
   // Orbit camera; OrbitControls handles touch (one finger rotates, two pan and zoom).
   const controls = new OrbitControls(camera, renderer.domElement);
