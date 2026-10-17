@@ -13,6 +13,8 @@ metadata:
     - firstVisibleHit
     - MAX_VISIBLE
     - select ray
+    - hidden beacon fork
+    - bus.beacons acknowledge
   provenance: code-verified
   slug: three-raycaster-ignores-visible-so-hidden-obelisk-parts-stay-pickable
   phase: phase-1
@@ -24,7 +26,7 @@ metadata:
     - laptop
   created: 2026-10-17
   originSessionId: 24fe07c2-1e38-4429-b5c7-e1be2b220156
-  modified: 2026-10-17T21:11:02.408Z
+  modified: 2026-10-17T21:46:57.626Z
 ---
 
 Live gotcha at the phase 1 tip. Audit proposed a fix and nobody applied it.
@@ -40,6 +42,8 @@ Live gotcha at the phase 1 tip. Audit proposed a fix and nobody applied it.
 **Why tests miss it.** The synthetic room repeats ids and never reaches 40 slabs. The beacon is plan 6's seam, so no pick test turns it on.
 
 **Fix proposed, not applied.** Either remove hidden slabs from the `stack` group and re-add them in the window, and add or remove the beacon in `setBeacon`. Or export `firstVisibleHit(hits)` from `src/input.js`. It would return the first hit whose object and every ancestor have `visible !== false`. A filter on `hit.object.visible` alone is not enough, because the hidden Group's children stay visible. A grep for `firstVisibleHit` at the tip finds nothing.
+
+**Plan 6 phase 1 built on it and did not fix it (recurrence, read from code, not reproduced in a browser).** `src/features/state.js` calls `setBeacon(true)` for a `waiting` status and adds the sid to `bus.beacons`. `src/features/fork.js` turns any base select into a fork unless `bus.beacons` has that sid. The beacon is hidden until a `waiting` status raises it, and a ray still hits it while hidden (`userData.kind` is `'base'`). So a stray ray through the hidden beacon of a non-waiting obelisk selects it, and `fork.js` then sends `{t:'fork', sid}` from an editing client. The beacon is a small cone (`ConeGeometry(0.08, 0.3, 6)`), so the risk is narrow. When the beacon is raised, the same hit is the intended acknowledge: it lowers the beacon and suppresses the fork. `src/input.js`, `src/features/xr.js` and `src/features/laptop.js` still contain no `visible` check at the plan 6 tip.
 
 **Rule.** Plans 4 and 6 add pick targets and a beacon. Filter hits by every ancestor's `visible`, or take the target out of the scene graph.
 
