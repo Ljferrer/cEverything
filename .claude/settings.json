@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "work-audit-refine": {
+      "source": {
+        "source": "github",
+        "repo": "Ljferrer/WorkAuditRefine"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "work-audit-refine@work-audit-refine": true
+  }
+}
