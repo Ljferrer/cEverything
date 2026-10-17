@@ -1,6 +1,11 @@
 // Entry: renderer, scene, camera, bus, net, then every feature in filename
 // order (PIN-16, PIN-17). Later plans add files under src/features/ and never
 // edit this file.
+//
+// Per-frame seams: `bus` emits `frame {dt, camera, renderer}` on every render,
+// and the install ctx carries `onFrame(cb)`: each registered `cb(dt, now)` runs
+// inside `renderer.setAnimationLoop` on every render, immersive sessions
+// included (a bare Object3D's `onBeforeRender` never fires there).
 import * as THREE from 'three';
 import { createBus } from './bus.js';
 import { createNet } from './net.js';
@@ -25,7 +30,13 @@ for (const i of [0, 1, 2]) scene.add(renderer.xr.getController(i));
 const bus = createBus();
 const net = createNet(bus);
 
-const ctx = { scene, camera, renderer, bus, net };
+/** @type {Array<(dt:number, now:number) => void>} */
+const frameCallbacks = [];
+const onFrame = (cb) => {
+  frameCallbacks.push(cb);
+};
+
+const ctx = { scene, camera, renderer, bus, net, onFrame };
 const features = import.meta.glob('./features/*.js', { eager: true });
 for (const path of Object.keys(features).sort()) {
   features[path].install?.(ctx);
@@ -38,7 +49,9 @@ window.addEventListener('resize', () => {
 });
 
 const clock = new THREE.Clock();
-renderer.setAnimationLoop(() => {
-  bus.emit('frame', { dt: clock.getDelta(), camera, renderer });
+renderer.setAnimationLoop((now) => {
+  const dt = clock.getDelta();
+  bus.emit('frame', { dt, camera, renderer });
+  for (const cb of frameCallbacks) cb(dt, now);
   renderer.render(scene, camera);
 });

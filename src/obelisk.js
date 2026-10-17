@@ -4,7 +4,7 @@
 // role-colored bar. Slabs stack by measured height (src/stack.js): troika lays
 // text out asynchronously, so every `sync` re-runs the layout when it completes,
 // and every band change with unchanged text re-runs it at once.
-// `setState` and `setBeacon` are the plan 6 seams.
+// `setState`, `setBeacon`, and `slabMesh` are the later plans' seams.
 //
 // Pick targets (PIN-22): every slab mesh carries userData {sid, slabId} and the
 // base carries userData {sid, kind:'base'}.
@@ -94,6 +94,15 @@ export class Obelisk extends THREE.Group {
   /** Plan 6 seam: show or hide the beacon above the stack. */
   setBeacon(on) {
     this.beacon.visible = Boolean(on);
+  }
+
+  /**
+   * Seam for plans 2 and 4: the scene object of the slab with `slabId`, or null.
+   * It is the Group placed in the stack (userData {sid, slabId}) that holds the
+   * slab's text and bar, so its world position is the slab's.
+   */
+  slabMesh(slabId) {
+    return this.#find(slabId);
   }
 
   /** A `slab` event: one new slab on top (or a replacement when the id repeats). */
