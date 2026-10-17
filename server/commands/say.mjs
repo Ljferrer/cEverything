@@ -7,6 +7,9 @@
 // client's `addSlab` replaces a slab whose id repeats, so two `say` calls
 // inside one millisecond (a burst caller, or `pipe` right after `say`) must
 // not share an id. The counter never resets while the module is loaded.
+// The plan slice pins the literal `'user-' + Date.now()`: the suffix is a
+// conscious deviation under the plan's mechanism latitude (End state 4 pins
+// no id form, and no consumer keys on the id).
 //
 // `title` is the shared title rule (PIN-36) that fork and pipe import; it
 // lives here because every `server/commands/*.mjs` is loaded as a command.
