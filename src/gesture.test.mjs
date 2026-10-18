@@ -200,3 +200,30 @@ test('ES10 state.js sets the steady state color and stops the pulse on a steady 
   tick(1000);
   assert.equal(color.getHex(), hexOf('error'));
 });
+
+test('ES11 state.js ignores live state and session frames while scrubbed and applies replayed ones', () => {
+  const bus = fakeBus();
+  const states = [];
+  const beacons = [];
+  const fakes = { a: fakeObelisk(states, beacons) };
+  const color = fakes.a.children[0].material.color;
+  installState({ bus, getObelisk: (sid) => fakes[sid] });
+
+  bus.emit('state', { t: 'state', sid: 'a', status: 'idle' });
+  bus.scrubbed = true;
+  bus.emit('state', { t: 'state', sid: 'a', status: 'waiting' });
+  bus.emit('session', { t: 'session', sid: 'a', status: 'error' });
+  assert.deepStrictEqual(states, ['idle']);
+  assert.deepStrictEqual(beacons, []);
+  assert.equal(bus.beacons.has('a'), false);
+  assert.equal(color.getHex(), hexOf('idle'));
+
+  bus.emit('state', { t: 'state', sid: 'a', status: 'error', replayed: true });
+  bus.emit('session', { t: 'session', sid: 'a', status: 'waiting', replayed: true });
+  assert.deepStrictEqual(states, ['idle', 'error', 'waiting']);
+  assert.deepStrictEqual(beacons, [true]);
+
+  bus.scrubbed = false;
+  bus.emit('state', { t: 'state', sid: 'a', status: 'idle' });
+  assert.deepStrictEqual(states, ['idle', 'error', 'waiting', 'idle']);
+});
