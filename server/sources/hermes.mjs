@@ -241,8 +241,11 @@ function unwrapEvent(msg) {
 
 // ---- Attach (PIN-11, PIN-35) ----
 
+/** A session's short id: `session_id` on create and branch replies, `id` in a v0.22.2 `session.active_list` entry. */
+const sidOf = (info) => info?.session_id ?? info?.id;
+
 function sessionFrame(info) {
-  const sid = info.session_id;
+  const sid = sidOf(info);
   const frame = {
     t: 'session',
     sid,
@@ -275,24 +278,29 @@ function seedHistory(sid, history) {
  * for yet (`src/features/room.js`), the order the relay's own backfill uses.
  */
 function attach(info) {
-  const sid = info?.session_id;
+  const sid = sidOf(info);
   if (typeof sid !== 'string' || !sid) return Promise.resolve();
   const inFlight = attaching.get(sid);
   if (inFlight) return inFlight;
+  const run = gen;
   const p = (async () => {
     const known = sessions.has(sid);
     if (!resumed.has(sid)) {
       try {
-        await request('session.resume', { session_id: sid, omit_messages: false, close_on_disconnect: false });
+        // v0.22.2 resumes by the stored key (`session_key` in a list entry,
+        // `stored_session_id` in a create reply); events still carry the short id.
+        const key = info.session_key ?? info.stored_session_id ?? sid;
+        await request('session.resume', { session_id: key, omit_messages: false, close_on_disconnect: false });
         resumed.add(sid);
       } catch {
-        if (!known) {
-          const frame = sessionFrame({ ...info, status: 'error' });
-          sessions.set(sid, frame);
-          emit(frame);
+        // A new session is announced anyway: a lazy session (no message yet)
+        // refuses resume, and its creator's socket already gets its events.
+        // A stop (or a newer start) rejected this resume: the run is over.
+        if (stopped || run !== gen) return;
+        if (known) {
+          errorState(sid);
+          return;
         }
-        errorState(sid);
-        return;
       }
     }
     if (!known) {
