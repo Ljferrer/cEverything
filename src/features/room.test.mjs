@@ -78,12 +78,14 @@ test('a new cherub moves no sibling, and cherubs float small in ranks behind the
   const across = (k) => (pos(k).x - pos('p').x) * -oz + (pos(k).z - pos('p').z) * ox;
   for (let k = 0; k < 8; k++) {
     assert.ok(behind(`k${k}`) >= mod.RANK_FIRST - 1e-9, `k${k} floats behind its parent`);
-    assert.ok(Math.abs(across(`k${k}`)) <= (mod.RANK_COLS / 2) * mod.RANK_STEP * (1 + mod.RANK_FAN) + 1e-9, `k${k} stays within its rank`);
+    const { rank } = mod.fanSeat(k);
+    assert.ok(Math.abs(across(`k${k}`)) <= (mod.rankSeats(rank) / 2) * mod.RANK_STEP + 1e-9, `k${k} stays within its rank`);
     assert.ok(pos(`k${k}`).y >= 0, `k${k} is never below the floor`);
     assert.equal(mod.getObelisk(`k${k}`).scale.x, mod.CHILD_SCALE);
   }
-  assert.ok(Math.abs(across('k0')) < mod.RANK_STEP && Math.abs(across('k1')) < mod.RANK_STEP, 'a rank fills from the middle out');
-  assert.ok(behind('k6') > behind('k0') && pos('k6').y > pos('k0').y, 'the next rank sits further back and higher');
+  assert.ok(Math.abs(across('k0')) < 1e-9, 'the fan starts at a single point behind the base');
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 6, 9].map(mod.rankSeats), [1, 1, 1, 2, 2, 2, 3, 4], 'then widens rank by rank');
+  assert.ok(behind('k6') > behind('k0') && pos('k6').y > pos('k0').y, 'later ranks sit further back and higher');
   assert.equal(pos('k0').y, 0, 'the fan starts on the floor at the parent\'s base');
   assert.ok(behind('k0') < 1, 'right behind the parent');
 });
@@ -113,7 +115,8 @@ test('WAR swarms of 160 cherubs fill stands that never collide, with each other 
   assert.ok(Math.max(...one.map((c) => flat(c, pos('r0')))) > 8, 'the ranks run far behind the chat');
   const { ox, oz } = mod.rootSlotPoint(0);
   const width = (cs) => { const a = cs.map((c) => (c.x - pos('r0').x) * -oz + (c.z - pos('r0').z) * ox); return Math.max(...a) - Math.min(...a); };
-  assert.ok(width(one.slice(-6)) > width(one.slice(0, 6)) * 1.3, 'the back rank spreads wider than the front: a fan, not a pillar');
+  assert.ok(width(one.slice(-6)) > 2, 'the back of the fan spreads wide');
+  assert.ok(width(one.slice(0, 1)) < 1e-9, 'its front is a single point');
 });
 
 test('fewer chats in the relay list pack the slots in their old order, and each path shrinks to its last chat', async () => {
