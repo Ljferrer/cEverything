@@ -14,14 +14,14 @@ import { hitToEvent, applySelection, rootOf, shouldInstallLaptop, latchLast } fr
 export const ERROR_MS = 4000;
 
 /**
- * Where the laptop camera starts: up and behind the viewer's spot, looking down
- * the aisle, so the first view shows the chats on both sides instead of near-band text
- * from the closest obelisk. A headset ignores this because its pose drives the
- * camera.
+ * Where the laptop camera starts: high on the diagonal between the east and
+ * south paths, looking at the center, so the first view shows all four paths
+ * instead of near-band text from the closest obelisk. A headset ignores this
+ * because its pose drives the camera.
  */
-export const LAPTOP_START = Object.freeze([0, 5, 5]);
-/** Where the laptop camera looks: down the aisle, past the first few chats. */
-export const LAPTOP_TARGET = Object.freeze([0, 1, -7]);
+export const LAPTOP_START = Object.freeze([13, 12, 13]);
+/** Where the laptop camera looks: the center plaza, where the four paths meet. */
+export const LAPTOP_TARGET = Object.freeze([0, 0, 0]);
 
 /** The say box target line shows the selected obelisk's title, else its sid, and follows a later retitle. */
 export function showTarget(bus, node, findObelisk) {
