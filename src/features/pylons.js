@@ -24,7 +24,7 @@ export const PYLON_RADIUS = 5; // legacy; placement now comes from PLACE
 export const PYLON_HEIGHT = 15; // the textured face at the foot, where labels sit and tool calls land
 export const PYLON_RISE = 2000; // the column: far past the camera's far plane, so it never ends in view
 export const PYLON_WIDTH = 3.2;
-export const PYLON_DEPTH = 0.7; // a flat monolith, broad face toward the aisle
+export const PYLON_DEPTH = 0.7; // a flat monolith, broad face toward the path
 export const GLOW_MS = 2000;
 const BASE_COLOR = new THREE.Color(MONOLITH_RED); // the SEELE red edges
 const GLOW_COLOR = new THREE.Color(0xffffff);
@@ -37,15 +37,15 @@ const BODY_GEOMETRY = new THREE.BoxGeometry(PYLON_WIDTH * BODY_INSET, PYLON_RISE
 const STARTS_KEPT = 256; // remembered `start` args; a lost `complete` never leaks past this
 
 /**
- * Far placement (PIN-51, revised for a full hall): the four monoliths stand in
- * a shallow arc past the end of the aisle (24 chats reach about z = -47), so
- * they loom at the vanishing point and every tool call arcs a long way out.
+ * Far placement (PIN-51, revised for the winding path): the four monoliths
+ * stand in a shallow arc past the end of the path (24 chats reach about
+ * z = -60), so they loom at its end and every tool call arcs a long way out.
  */
 export const PLACE = Object.freeze({
-  browser: { x: -26, z: -62 },
-  shell: { x: -9, z: -72 },
-  other: { x: 9, z: -72 },
-  filesystem: { x: 26, z: -62 },
+  browser: { x: -28, z: -84 },
+  shell: { x: -10, z: -94 },
+  other: { x: 10, z: -94 },
+  filesystem: { x: 28, z: -84 },
 });
 
 /** The face texture URL for a pylon name. */
@@ -110,7 +110,7 @@ function makePylon(name, load) {
   g.add(label);
   const p = PLACE[name];
   g.position.set(p.x, 0, p.z);
-  g.lookAt(0, 0, 0); // the broad face turns back up the aisle; install turns the labels to the camera each frame
+  g.lookAt(0, 0, 0); // the broad face turns back up the path; install turns the labels to the camera each frame
   return { group: g, box, face, label, glowUntil: -Infinity };
 }
 

@@ -60,7 +60,8 @@ test('a third root moves neither earlier root', async () => {
   session('c');
   assert.ok(pos('a').equals(a));
   assert.ok(pos('b').equals(b));
-  assert.deepEqual([pos('c').x, pos('c').z], [-mod.AISLE_OFFSET, mod.FIRST_ROW_Z - mod.ROW_GAP]);
+  const third = mod.rootSlotPoint(2);
+  assert.deepEqual([pos('c').x, pos('c').z], [third.x, third.z]);
   assert.ok(pos('c').distanceTo(a) > 1 && pos('c').distanceTo(b) > 1);
 });
 
@@ -75,9 +76,12 @@ test('a new child moves no sibling, and each stands in a row behind its parent',
   session('k3', 'p', 'build');
   assert.ok(pos('k1').equals(k1));
   assert.ok(pos('k2').equals(k2));
+  const { ox, oz } = mod.rootSlotPoint(0);
   for (const k of ['k1', 'k2', 'k3']) {
-    assert.ok(Math.abs(pos(k).x) > Math.abs(pos('p').x) + 1, `${k} on the far side of its parent from the aisle`);
-    assert.ok(Math.abs(pos(k).z - pos('p').z) <= 1.5 + 1e-9, `${k} within its parent's row length`);
+    const dx = pos(k).x - pos('p').x;
+    const dz = pos(k).z - pos('p').z;
+    assert.ok(dx * ox + dz * oz > 1, `${k} stands behind its parent, away from the path`);
+    assert.ok(Math.abs(dx * -oz + dz * ox) <= 1.5 + 1e-9, `${k} within its parent's row length`);
   }
   assert.equal(mod.getObelisk('k3').scale.x, mod.CHILD_SCALE);
 });
@@ -118,18 +122,31 @@ test('the room works with no localStorage at all', async () => {
   }
 });
 
-test('roots alternate left and right of one aisle, 4 m per pair, and every chat stays clear of the aisle and the pylons', async () => {
+test('roots alternate sides of a winding path, and every chat stays clear of the path, the others, and the pylons', async () => {
   store.clear();
   const { mod, session, pos } = await room();
-  for (let i = 0; i < 8; i++) session(`r${i}`);
-  for (let k = 0; k < 4; k++) session(`r${k}-kid`, `r${k}`);
-  assert.deepEqual([pos('r0').x, pos('r0').z], [-mod.AISLE_OFFSET, mod.FIRST_ROW_Z]);
-  assert.deepEqual([pos('r1').x, pos('r1').z], [mod.AISLE_OFFSET, mod.FIRST_ROW_Z]);
-  assert.deepEqual([pos('r2').x, pos('r2').z], [-mod.AISLE_OFFSET, mod.FIRST_ROW_Z - mod.ROW_GAP]);
-  const all = [...Array(8).keys()].map((i) => `r${i}`).concat([0, 1, 2, 3].map((k) => `r${k}-kid`));
-  for (const sid of all) {
-    assert.ok(Math.abs(pos(sid).x) >= 2, `${sid} leaves the aisle (|x| < 2 m) clear`);
-    for (const { x, z } of Object.values(PLACE)) assert.ok(Math.hypot(pos(sid).x - x, pos(sid).z - z) >= 2.5, `${sid} vs pylon`);
+  const N = 24;
+  for (let i = 0; i < N; i++) session(`r${i}`);
+  for (let k = 0; k < 6; k++) session(`r${k}-kid`, `r${k}`);
+  const xs = [];
+  for (let i = 0; i < N; i++) {
+    const slot = mod.rootSlotPoint(i);
+    const p = mod.pathPoint(slot.s);
+    const side = (pos(`r${i}`).x - p.x) * p.lx + (pos(`r${i}`).z - p.z) * p.lz;
+    assert.ok(Math.abs(Math.abs(side) - mod.PATH_SIDE) < 1e-9, `r${i} stands PATH_SIDE from the path`);
+    assert.equal(Math.sign(side), i % 2 === 0 ? 1 : -1, `r${i} on the ${i % 2 === 0 ? 'left' : 'right'}`);
+    xs.push(p.x);
   }
-  for (let i = 0; i < 8; i++) for (let j = i + 1; j < 8; j++) assert.ok(pos(`r${i}`).distanceTo(pos(`r${j}`)) >= 4, `r${i} r${j}`);
+  assert.ok(Math.max(...xs) - Math.min(...xs) > 2 * mod.PATH_SWING * 0.9, 'the path swings side to side, not a straight hallway');
+  // Distance to the path: sample it finely.
+  const pathPts = Array.from({ length: 2000 }, (_, i) => mod.pathPoint(i * 0.05));
+  const fromPath = (q) => Math.min(...pathPts.map((p) => Math.hypot(q.x - p.x, q.z - p.z)));
+  const all = [...Array(N).keys()].map((i) => `r${i}`).concat([...Array(6).keys()].map((k) => `r${k}-kid`));
+  for (const sid of all) {
+    assert.ok(fromPath(pos(sid)) >= 2, `${sid} leaves the path clear (${fromPath(pos(sid)).toFixed(2)} m)`);
+    for (const { x, z } of Object.values(PLACE)) assert.ok(Math.hypot(pos(sid).x - x, pos(sid).z - z) >= 10, `${sid} vs pylon`);
+  }
+  for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) assert.ok(pos(`r${i}`).distanceTo(pos(`r${j}`)) >= 3.5, `r${i} r${j} ${pos(`r${i}`).distanceTo(pos(`r${j}`)).toFixed(2)}`);
+  const ribbon = mod.pathRibbonLength();
+  assert.ok(ribbon > mod.rootSlotPoint(N - 1).s, 'the lit path reaches past the farthest chat');
 });
