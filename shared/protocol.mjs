@@ -9,11 +9,14 @@
 //   {t:'tool',    sid, id, name, phase:'start'|'complete', args, summary, diff}
 //   {t:'state',   sid, status:'idle'|'working'|'streaming'|'waiting'|'error'}
 //   {t:'error',   text}
+//   {t:'chats',   chats:[{sid, harness, title, status, agents}], include:[sid]|null}
+//                 every main chat the relay knows, and the room's selection (null = all)
 // client → server
 //   {t:'say',   sid, text}
 //   {t:'fork',  sid}
 //   {t:'pipe',  from, to, slab}
 //   {t:'voice', sid, mime, data_url}
+//   {t:'include', sids:[sid]|null}   pick the main chats every viewer sees (null = all)
 
 export const MODES = Object.freeze(['live', 'replay', 'synthetic']);
 export const HARNESSES = Object.freeze(['hermes', 'claude', 'codex', 'synthetic']);
@@ -22,8 +25,8 @@ export const ROLES = Object.freeze(['user', 'assistant', 'thinking', 'tool']);
 export const TOOL_PHASES = Object.freeze(['start', 'complete']);
 export const STATUSES = Object.freeze(['idle', 'working', 'streaming', 'waiting', 'error']);
 
-export const SERVER_EVENTS = Object.freeze(['mode', 'session', 'slab', 'delta', 'tool', 'state', 'error']);
-export const CLIENT_COMMANDS = Object.freeze(['say', 'fork', 'pipe', 'voice']);
+export const SERVER_EVENTS = Object.freeze(['mode', 'session', 'slab', 'delta', 'tool', 'state', 'error', 'chats']);
+export const CLIENT_COMMANDS = Object.freeze(['say', 'fork', 'pipe', 'voice', 'include']);
 
 /** Every event name, grouped by direction. Clients subscribe to `bus` under these names. */
 export const EVENTS = Object.freeze({ server: SERVER_EVENTS, client: CLIENT_COMMANDS });
@@ -34,6 +37,9 @@ const bool = (v) => typeof v === 'boolean';
 const num = (v) => typeof v === 'number' && Number.isFinite(v);
 const oneOf = (list) => (v) => list.includes(v);
 const any = () => true;
+const strs = (v) => Array.isArray(v) && v.every(str);
+const chatList = (v) =>
+  Array.isArray(v) && v.every((c) => c && str(c.sid) && HARNESSES.includes(c.harness) && str(c.title) && STATUSES.includes(c.status) && num(c.agents));
 
 const SERVER_SHAPES = {
   mode: { req: { mode: oneOf(MODES), canEdit: bool }, opt: {} },
@@ -49,6 +55,7 @@ const SERVER_SHAPES = {
   },
   state: { req: { sid: str, status: oneOf(STATUSES) }, opt: {} },
   error: { req: { text: str }, opt: {} },
+  chats: { req: { chats: chatList }, opt: { include: strs } },
 };
 
 const CLIENT_SHAPES = {
@@ -56,6 +63,7 @@ const CLIENT_SHAPES = {
   fork: { req: { sid: str }, opt: {} },
   pipe: { req: { from: str, to: str, slab: str }, opt: {} },
   voice: { req: { sid: str, mime: str, data_url: str }, opt: {} },
+  include: { req: {}, opt: { sids: strs } },
 };
 
 function matches(shapes, o) {

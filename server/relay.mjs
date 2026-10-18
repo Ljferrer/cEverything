@@ -39,7 +39,7 @@
 // does not own (`--replay`, `--seed`, `--fast`) are ignored here; sources read
 // them from process.argv themselves.
 import { WebSocketServer } from 'ws';
-import { readdir, appendFile } from 'node:fs/promises';
+import { readdir, appendFile, readFile, writeFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs as parseCliArgs } from 'node:util';
@@ -88,6 +88,7 @@ export async function startRelay({
   sources: wanted = DEFAULT_SOURCES,
   record = null,
   editKey = process.env.OBELISKS_EDIT_KEY ?? 'edit',
+  includeFile = null,
   sourcesDir = path.join(HERE, 'sources'),
   commandsDir = path.join(HERE, 'commands'),
   log = (...a) => console.error('[relay]', ...a),
@@ -118,6 +119,8 @@ export async function startRelay({
     slabs: new Map(),
     /** sid → last `state` frame, replayed after the slabs so a late client sees the current status. */
     states: new Map(),
+    /** The main chats every viewer sees, as a Set of root sids, or null for all; their subagents follow them. */
+    include: await loadInclude(includeFile, log),
     /** sid → name of the source that announced the session. */
     owners: new Map(),
     /** name → started source module. */
@@ -128,6 +131,59 @@ export async function startRelay({
     ownerOf: (sid) => relay.sources.get(relay.owners.get(sid)) ?? null,
     close,
   };
+
+  /** The main chat a sid belongs to: itself, or the root of its parent chain. */
+  function rootOf(sid) {
+    let s = sid;
+    for (let i = 0; i < 16; i++) {
+      const parent = relay.sessions.get(s)?.parent;
+      if (!parent) break;
+      s = parent;
+    }
+    return s;
+  }
+
+  /** False for a frame of a chat (or subagent) left out of the room's selection. */
+  function shown(frame) {
+    return !relay.include || typeof frame?.sid !== 'string' || relay.include.has(rootOf(frame.sid));
+  }
+
+  /** Every main chat with its subagent count, and the selection. */
+  function chatsFrame() {
+    const agents = new Map();
+    for (const s of relay.sessions.values()) if (s.parent) agents.set(rootOf(s.sid), (agents.get(rootOf(s.sid)) ?? 0) + 1);
+    const chats = [...relay.sessions.values()]
+      .filter((s) => !s.parent)
+      .map((s) => ({ sid: s.sid, harness: s.harness, title: s.title, status: s.status, agents: agents.get(s.sid) ?? 0 }));
+    return { t: 'chats', chats, include: relay.include ? [...relay.include] : null };
+  }
+
+  let chatsTimer = null;
+  /** Tell every client the chat list, at most twice a second while sessions pour in. */
+  function announceChats(now = false) {
+    if (now) {
+      clearTimeout(chatsTimer);
+      chatsTimer = null;
+      for (const c of relay.clients) sendTo(c, chatsFrame());
+      return;
+    }
+    chatsTimer ??= setTimeout(() => announceChats(true), 500);
+  }
+
+  /** Set the room's selection (null = all); persists to `includeFile` when one is set. */
+  function setInclude(sids) {
+    relay.include = Array.isArray(sids) ? new Set(sids) : null;
+    if (includeFile) writeFile(includeFile, JSON.stringify(relay.include ? [...relay.include] : null)).catch((e) => log('include save failed:', e.message));
+    // Each client gets the new list first (it clears its room on a changed pick), then the picked chats' backfill.
+    clearTimeout(chatsTimer);
+    chatsTimer = null;
+    for (const c of relay.clients) {
+      sendTo(c, chatsFrame());
+      backfill(c);
+    }
+  }
+  relay.setInclude = setInclude;
+  relay.chatsFrame = chatsFrame;
 
   function modeFrame(client) {
     return { t: 'mode', mode: relay.mode, canEdit: client.canEdit };
@@ -168,9 +224,11 @@ export async function startRelay({
       log('dropped invalid frame from', owner ?? 'relay', JSON.stringify(frame).slice(0, 200));
       return false;
     }
+    const known = frame.t === 'session' && relay.sessions.has(frame.sid);
     remember(frame, owner);
     if (record) appendFile(record, JSON.stringify(frame) + '\n').catch((e) => log('record failed:', e.message));
-    for (const c of relay.clients) sendTo(c, frame);
+    if (shown(frame)) for (const c of relay.clients) sendTo(c, frame);
+    if (frame.t === 'session' && !known) announceChats();
     return true;
   }
 
@@ -178,6 +236,7 @@ export async function startRelay({
   function backfill(client) {
     const sids = new Set([...relay.sessions.keys(), ...relay.slabs.keys(), ...relay.states.keys()]);
     for (const sid of sids) {
+      if (!shown({ sid })) continue;
       const session = relay.sessions.get(sid);
       if (session) sendTo(client, session);
       for (const s of relay.slabs.get(sid) ?? []) sendTo(client, s);
@@ -253,6 +312,7 @@ export async function startRelay({
     const client = { ws, canEdit: key === editKey };
     relay.clients.add(client);
     sendTo(client, modeFrame(client));
+    sendTo(client, chatsFrame());
     backfill(client);
     ws.on('message', (data) => {
       let cmd;
@@ -268,6 +328,7 @@ export async function startRelay({
   });
 
   async function close() {
+    clearTimeout(chatsTimer);
     for (const [name, mod] of relay.sources) {
       try {
         await mod.stop?.();
@@ -284,11 +345,23 @@ export async function startRelay({
   return relay;
 }
 
+/** The saved selection in `file`: a Set of sids, or null for all (no file, unreadable, or not a list). */
+async function loadInclude(file, log) {
+  if (!file) return null;
+  try {
+    const v = JSON.parse(await readFile(file, 'utf8'));
+    return Array.isArray(v) && v.every((s) => typeof s === 'string') ? new Set(v) : null;
+  } catch (err) {
+    if (err.code !== 'ENOENT') log('include file unreadable, showing every chat:', err.message);
+    return null;
+  }
+}
+
 /** The relay's own flags; anything else (and every positional) is left for sources. */
 export function parseArgs(argv) {
   const { values } = parseCliArgs({
     args: argv,
-    options: { source: { type: 'string' }, record: { type: 'string' }, port: { type: 'string' } },
+    options: { source: { type: 'string' }, record: { type: 'string' }, port: { type: 'string' }, 'include-file': { type: 'string' } },
     strict: false,
     allowPositionals: true,
   });
@@ -296,6 +369,7 @@ export function parseArgs(argv) {
   if (typeof values.source === 'string') opts.sources = values.source;
   if (typeof values.record === 'string') opts.record = values.record;
   if (typeof values.port === 'string') opts.port = Number(values.port);
+  if (typeof values['include-file'] === 'string') opts.includeFile = values['include-file'];
   return opts;
 }
 

@@ -24,8 +24,8 @@ const clientFrames = [
 ];
 
 test('EVENTS lists both directions', () => {
-  assert.deepEqual([...EVENTS.server], ['mode', 'session', 'slab', 'delta', 'tool', 'state', 'error']);
-  assert.deepEqual([...EVENTS.client], ['say', 'fork', 'pipe', 'voice']);
+  assert.deepEqual([...EVENTS.server], ['mode', 'session', 'slab', 'delta', 'tool', 'state', 'error', 'chats']);
+  assert.deepEqual([...EVENTS.client], ['say', 'fork', 'pipe', 'voice', 'include']);
 });
 
 test('isServerEvent accepts every server shape', () => {
@@ -70,4 +70,15 @@ test('optional keys may be absent entirely, not only null; a non-string parent i
   assert.equal(isServerEvent({ t: 'session', sid: 's', harness: 'hermes', kind: 'chat', title: 'Plan', status: 'idle' }), true);
   assert.equal(isServerEvent({ t: 'tool', sid: 's', id: 't', name: 'terminal', phase: 'start' }), true);
   assert.equal(isServerEvent({ t: 'session', sid: 's', harness: 'hermes', kind: 'chat', title: 'Plan', status: 'idle', parent: 7 }), false);
+});
+
+test('the chats frame and the include command validate their lists', () => {
+  const chat = { sid: 'a', harness: 'claude', title: 'A', status: 'idle', agents: 3 };
+  assert.equal(isServerEvent({ t: 'chats', chats: [chat], include: null }), true);
+  assert.equal(isServerEvent({ t: 'chats', chats: [chat], include: ['a'] }), true);
+  assert.equal(isServerEvent({ t: 'chats', chats: [{ ...chat, agents: '3' }] }), false);
+  assert.equal(isServerEvent({ t: 'chats', chats: [chat], include: [1] }), false);
+  assert.equal(isClientCommand({ t: 'include', sids: ['a', 'b'] }), true);
+  assert.equal(isClientCommand({ t: 'include', sids: null }), true, 'null shows every chat');
+  assert.equal(isClientCommand({ t: 'include', sids: 'a' }), false);
 });
