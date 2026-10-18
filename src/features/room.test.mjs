@@ -113,6 +113,29 @@ test('WAR swarms of 160 cherubs fill stands that never collide, with each other 
   assert.ok(width(one.slice(-6)) > width(one.slice(0, 6)) * 1.3, 'the back rank spreads wider than the front: a fan, not a pillar');
 });
 
+test('fewer chats in the relay list pack the slots in their old order, and each path shrinks to its last chat', async () => {
+  store.clear();
+  const { mod, session, pos } = await room();
+  const N = 16;
+  for (let i = 0; i < N; i++) session(`r${i}`);
+  const longest = Math.max(...[0, 1, 2, 3].map((k) => mod.pathRibbonLength(k)));
+  const keep = ['r2', 'r9', 'r15', 'r4']; // out of order on purpose
+  const list = (sids) => ({ t: 'chats', chats: sids.map((sid) => ({ sid, harness: 'claude', title: sid, status: 'idle', agents: 0 })), include: null });
+  mod.packSlots(list(keep).chats.map((c) => c.sid));
+  const slotOf = (sid) => [...Array(N).keys()].find((n) => { const p = mod.rootSlotPoint(n); return Math.abs(p.x - pos(sid).x) < 1e-9 && Math.abs(p.z - pos(sid).z) < 1e-9; });
+  assert.deepEqual(['r2', 'r4', 'r9', 'r15'].map(slotOf), [0, 1, 2, 3], 'the kept chats take slots 0..3 in their old order');
+  assert.equal(mod.getObelisk('r0'), null, 'a chat left out of the list leaves the room');
+  assert.equal(mod.allObelisks().length, 4);
+  for (let k = 0; k < 4; k++) {
+    assert.ok(mod.pathRibbonLength(k) < longest, `path ${mod.PATHS[k].name} shrinks`);
+    assert.ok(mod.pathRibbonLength(k) > mod.rootSlotPoint(k).s, 'and still reaches past its chat');
+  }
+  const before = ['r2', 'r4', 'r9', 'r15'].map((sid) => pos(sid).clone());
+  mod.packSlots(['r2', 'r4', 'r9', 'r15', 'r1']); // a chat joins the list
+  session('new');
+  ['r2', 'r4', 'r9', 'r15'].forEach((sid, i) => assert.ok(pos(sid).equals(before[i]), `${sid} stays put when a chat arrives`));
+});
+
 test('a reload with a stored slot map restores every position', async () => {
   store.clear();
   const first = await room();

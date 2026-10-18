@@ -11,7 +11,10 @@
 // tiered ranks (see RANK_*); a WAR swarm of a hundred or more fills a rising
 // stand behind its chat. One floor label per shared `phase`
 // (PIN-21). A session takes the next free slot when first seen and
-// keeps it, so nothing ever moves: the room is spatial memory. The sid -> slot
+// keeps it, so nothing moves when another chat arrives: the room is spatial
+// memory. When the relay's chat list leaves chats out (the CHATS pick, or a
+// smaller relay), the slots pack down to the chats in the room, in their old
+// order, and each path shrinks to just past its last chat. The sid -> slot
 // map lives in localStorage, so a reload puts every known sid back where it
 // was. Routes `slab`, `delta`, and `state` to the matching obelisk.
 import * as THREE from 'three';
@@ -99,6 +102,8 @@ export function install({ scene, bus }) {
   // While timeline.js holds the room scrubbed back (`bus.scrubbed`), only its re-emitted (`replayed`) frames apply.
   const shown = (fn) => (e) => (!bus.scrubbed || e.detail?.replayed) && fn(e.detail);
   bus.addEventListener('session', shown(onSession));
+  // The relay sends its chat list before any session, and again when it changes.
+  bus.addEventListener('chats', (e) => packSlots(e.detail.include ?? e.detail.chats.map((c) => c.sid)));
   bus.addEventListener('slab', shown((d) => getObelisk(d.sid)?.addSlab(d)));
   bus.addEventListener('delta', shown((d) => getObelisk(d.sid)?.appendDelta(d)));
   bus.addEventListener('state', shown((d) => getObelisk(d.sid)?.setState(d.status)));
@@ -161,6 +166,34 @@ const lowestFree = (taken) => {
   while (taken.has(n)) n++;
   return n;
 };
+
+/**
+ * Keep the stored slots of `sids` (the main chats in the room), in their
+ * stored order, packed from 0, and forget every other chat's slot. When the
+ * slots are already packed, as when a chat is added, nothing moves.
+ */
+export function packSlots(sids) {
+  const listed = new Set(sids);
+  // A main chat the list leaves out leaves the room, with every subagent under it.
+  const rootSid = (o) => {
+    let r = o;
+    for (let i = 0; i < 16 && r.session.parent && obelisks.has(r.session.parent); i++) r = obelisks.get(r.session.parent);
+    return r.sid;
+  };
+  const gone = [...obelisks.values()].filter((o) => !listed.has(rootSid(o)));
+  for (const o of gone) {
+    room?.remove(o);
+    o.dispose();
+    obelisks.delete(o.sid);
+  }
+  const kept = sids.filter((sid) => Number.isInteger(slots.root[sid])).sort((a, b) => slots.root[a] - slots.root[b]);
+  const next = Object.fromEntries(kept.map((sid, i) => [sid, i]));
+  const same = Object.keys(next).length === Object.keys(slots.root).length && kept.every((sid) => slots.root[sid] === next[sid]);
+  if (same && !gone.length) return;
+  slots.root = next;
+  saveSlots();
+  if (room) layout();
+}
 
 // A stored slot stays reserved for its sid even before that sid arrives.
 function rootSlot(sid) {
@@ -389,10 +422,10 @@ export const landmarkOf = (k) => landmarks[k] ?? null;
 /** The length of lit path `k` on the floor, 0 before the first layout. */
 export const pathRibbonLength = (k) => ribbons[k]?.userData.length ?? 0;
 
-/** Lay ribbon `k` to just past its farthest chat, at least the first stretch; rebuilt only when it must grow. */
+/** Lay ribbon `k` to just past its farthest chat (at least the first stretch); rebuilt whenever that length changes, so it grows and shrinks. */
 function layPath(k, farthest) {
   const length = Math.max(FIRST_S + CHAT_GAP, farthest + CHAT_GAP * 2);
-  if (ribbons[k] && ribbons[k].userData.length >= length) return;
+  if (ribbons[k] && ribbons[k].userData.length === length) return;
   if (ribbons[k]) {
     room.remove(ribbons[k]);
     ribbons[k].geometry.dispose();
