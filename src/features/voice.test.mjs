@@ -2,7 +2,7 @@
 // resolve/load hook swaps troika-three-text for a three-free stub Text, and
 // MediaRecorder, FileReader, the mic, the clock and setTimeout are faked, so
 // neither three nor room.js loads. Covers the release paths of issues #22,
-// #23 and #25 and the 300 ms hold before bus.talking is set.
+// #23 and #25, the 300 ms hold before bus.talking is set, and #24 and #26 to #29.
 import { registerHooks } from 'node:module';
 import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
@@ -28,10 +28,37 @@ registerHooks({
 
 // Browser globals voice.js touches.
 const clicks = [];
+const buttons = [];
 globalThis.location = { search: '' };
-globalThis.document = { addEventListener: (type, fn) => type === 'click' && clicks.push(fn) };
+globalThis.document = {
+  addEventListener: (type, fn) => type === 'click' && clicks.push(fn),
+  createElement: () => {
+    const el = new EventTarget();
+    el.style = {};
+    el.textContent = '';
+    return el;
+  },
+  body: { appendChild: (el) => buttons.push(el) },
+};
+
+// A fake mic stream with one audio track; `end()` ends it like a device change.
+function fakeStream() {
+  const track = { readyState: 'live' };
+  return { getAudioTracks: () => [track], getTracks: () => [track], end: () => (track.readyState = 'ended') };
+}
+const streams = [];
+// Tests swap this to hold a getUserMedia request pending.
+let getUserMedia = async () => fakeStream();
 Object.defineProperty(globalThis, 'navigator', {
-  value: { mediaDevices: { getUserMedia: async () => ({ fake: 'stream' }) } },
+  value: {
+    mediaDevices: {
+      getUserMedia: async (c) => {
+        const s = await getUserMedia(c);
+        streams.push(s);
+        return s;
+      },
+    },
+  },
   configurable: true,
 });
 
@@ -74,6 +101,10 @@ globalThis.FileReader = class {
 
 class FakeRecognizer {
   static stops = 0;
+  static all = [];
+  constructor() {
+    FakeRecognizer.all.push(this);
+  }
   start() {}
   stop() {
     FakeRecognizer.stops++;
@@ -109,8 +140,8 @@ async function setup(t) {
   bus.emit('mode', { canEdit: true });
   bus.selected = 's1';
   bus.addEventListener('talk', (e) => talks.push(e.detail));
-  // The glyph's REC label is the first text added to the camera.
-  return { bus, sent, talks, renderer, label: camera.children[0] };
+  // The glyph's REC label is the first text added to the camera, the interim text the second.
+  return { bus, sent, talks, renderer, label: camera.children[0], interim: camera.children[1] };
 }
 
 const press = (bus, controller) => bus.emit('selectstart', { sid: 's1', controller });
@@ -301,4 +332,88 @@ test('#25: a late stop from a dropped take leaves the next take alone', async (t
   await flush();
   await flush();
   assert.equal(sent.length, 1);
+});
+
+test('#24: a late recognizer result after release does not re-show the interim text', async (t) => {
+  const { bus, interim } = await setup(t);
+  press(bus, 0);
+  const recognizer = FakeRecognizer.all.at(-1);
+  advance(400);
+  recognizer.onresult?.({ results: [[{ transcript: 'hello' }]] });
+  assert.equal(interim.visible, true);
+  release(bus, 0);
+  await flush();
+  await flush();
+  assert.equal(interim.visible, false);
+  // A final result that lands after stop() and after the glyph hid.
+  recognizer.onresult?.({ results: [[{ transcript: 'hello there' }]] });
+  assert.equal(interim.visible, false);
+});
+
+test('#26: an ended mic track is not armed, and the next VRButton click gets a new stream', async (t) => {
+  const { bus, talks } = await setup(t);
+  const old = streams.at(-1);
+  old.end();
+  const recordersBefore = FakeRecorder.all.length;
+  press(bus, 0);
+  assert.equal(FakeRecorder.all.length, recordersBefore, 'no recorder on a dead stream');
+  assert.deepEqual(talks.at(-1), { phase: 'error', sid: 's1' });
+  // A fresh install's VRButton click re-requests the mic.
+  mock.timers.reset();
+  const { bus: bus2 } = await setup(t);
+  assert.notEqual(streams.at(-1), old, 'a new stream was requested');
+  press(bus2, 0);
+  assert.equal(lastRecorder().state, 'recording');
+  advance(400);
+  release(bus2, 0);
+  await flush();
+  await flush();
+});
+
+test('#27: a missing MediaRecorder global reports a talk error instead of throwing', async (t) => {
+  const { bus, talks } = await setup(t);
+  delete globalThis.MediaRecorder;
+  t.after(() => (globalThis.MediaRecorder = FakeRecorder));
+  assert.doesNotThrow(() => press(bus, 0));
+  assert.deepEqual(talks.at(-1), { phase: 'error', sid: 's1' });
+});
+
+test('#28: a release past 300 ms before the hold timer runs is a plain select and sends nothing', async (t) => {
+  const { bus, sent, talks } = await setup(t);
+  press(bus, 0);
+  clock += 301; // the wall clock passed 300 ms, the timer task has not run yet
+  const cmd = releaseOnBase(bus, 0);
+  assert.deepEqual(cmd, { t: 'fork', sid: 's1' }, 'fork reads bus.talking unset');
+  await flush();
+  await flush();
+  assert.equal(sent.length, 0, 'the same press does not also talk');
+  assert.equal(talks.at(-1).phase, 'dropped');
+  advance(300);
+  assert.equal(bus.talking ?? null, null);
+});
+
+test('#29: a second Enable mic click while the request is pending does not read Mic failed', async (t) => {
+  // A fresh module instance, so no mic stream is held yet.
+  const fresh = await import('./voice.js?mic-button');
+  location.search = '?mic=button';
+  t.after(() => (location.search = ''));
+  let grant;
+  getUserMedia = () => new Promise((resolve) => (grant = () => resolve(fakeStream())));
+  t.after(() => (getUserMedia = async () => fakeStream()));
+  fresh.install({
+    scene: { add() {} },
+    camera: { parent: {}, add() {} },
+    renderer: { xr: new EventTarget() },
+    bus: new Bus(),
+    net: { send() {} },
+  });
+  const button = buttons.at(-1);
+  assert.equal(button.textContent, 'Enable mic');
+  button.dispatchEvent(new Event('click'));
+  button.dispatchEvent(new Event('click'));
+  await flush();
+  assert.notEqual(button.textContent, 'Mic failed');
+  grant();
+  await flush();
+  assert.equal(button.textContent, 'Mic on');
 });
