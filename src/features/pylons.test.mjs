@@ -1,7 +1,8 @@
 // pylons.js under node with a fake bus and an injected getObelisk: a
 // resolve/load hook swaps troika-three-text for a stub Text that extends
 // Object3D, so three loads but no renderer and no DOM. Covers the filesystem
-// detail label and the labels turning to the camera.
+// detail label, the labels turning to the camera, and the textured faces
+// (an injected loader stands in for TextureLoader, which needs a DOM).
 import { registerHooks } from 'node:module';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -25,7 +26,7 @@ registerHooks({
 });
 
 const THREE = await import('three');
-const { install, detailText } = await import('./pylons.js');
+const { install, detailText, textureUrl, GLOW_MS } = await import('./pylons.js');
 
 function fakeBus() {
   const bus = Object.assign(new EventTarget(), { selected: null, selectedSlab: null, talking: null });
@@ -33,11 +34,11 @@ function fakeBus() {
   return bus;
 }
 
-function setup() {
+function setup(load = () => {}) {
   const bus = fakeBus();
   const scene = new THREE.Scene();
   const obelisk = new THREE.Object3D(); // no slabs, so a start launches from the obelisk itself
-  install({ scene, bus, getObelisk: (sid) => (sid === 's1' ? obelisk : null) });
+  install({ scene, bus, getObelisk: (sid) => (sid === 's1' ? obelisk : null), load });
   const detail = scene.getObjectByName('pylon:filesystem:detail');
   return { bus, scene, detail };
 }
@@ -86,4 +87,59 @@ test('every pylon label faces the camera after a frame, even from behind a pylon
     toCamera.copy(camera.position).sub(label.getWorldPosition(new THREE.Vector3())).normalize();
     assert.ok(facing.dot(toCamera) > 0.999, `label "${label.name || label.parent.name}" faces the camera`);
   }
+});
+
+const NAMES = ['browser', 'filesystem', 'shell', 'other'];
+
+/** A loader that records each request and loads only when told to. */
+function fakeLoader() {
+  const pending = new Map();
+  const load = (url, onLoad) => pending.set(url, onLoad);
+  return { load, pending, loadAll: () => pending.forEach((onLoad) => onLoad(new THREE.Texture())) };
+}
+
+test('each pylon asks for its texture and keeps the wireframe look until it loads', () => {
+  const loader = fakeLoader();
+  const { scene } = setup(loader.load);
+  assert.deepEqual([...loader.pending.keys()], NAMES.map((n) => `/assets/pylon-${n}.jpg`));
+  assert.equal(textureUrl('shell'), '/assets/pylon-shell.jpg');
+  for (const n of NAMES) {
+    const face = scene.getObjectByName(`pylon:${n}:face`);
+    assert.equal(face.visible, false, `${n} face hidden before its texture loads`);
+    assert.equal(face.material.map, null);
+  }
+  loader.loadAll();
+  for (const n of NAMES) {
+    const face = scene.getObjectByName(`pylon:${n}:face`);
+    assert.equal(face.visible, true, `${n} face shown once its texture loads`);
+    assert.ok(face.material.map?.isTexture);
+    assert.equal(face.material.map.colorSpace, THREE.SRGBColorSpace);
+  }
+});
+
+test('with no DOM the default loader fails quietly and the faces stay hidden', () => {
+  const bus = fakeBus();
+  const scene = new THREE.Scene();
+  install({ scene, bus, getObelisk: () => null });
+  for (const n of NAMES) assert.equal(scene.getObjectByName(`pylon:${n}:face`).visible, false);
+});
+
+test('a tool start brightens the textured face and it settles after the glow', (t) => {
+  let now = 1_000_000;
+  t.mock.method(Date, 'now', () => now);
+  const loader = fakeLoader();
+  const { bus, scene } = setup(loader.load);
+  loader.loadAll();
+  const face = scene.getObjectByName('pylon:shell:face');
+  const idle = face.material.color.clone();
+
+  bus.emit('tool', { t: 'tool', sid: 's1', id: 'b1', name: 'Bash', phase: 'start', args: { command: 'ls' } });
+  bus.emit('frame', { dt: 0.016 });
+  assert.ok(face.material.color.r > 1, `shell face flares past 1 (r = ${face.material.color.r})`);
+  assert.ok(face.material.color.r > face.material.color.g, 'the flare leans red');
+  assert.ok(scene.getObjectByName('pylon:browser:face').material.color.equals(idle), 'other pylons stay idle');
+
+  now += GLOW_MS;
+  bus.emit('frame', { dt: 0.016 });
+  assert.ok(face.material.color.equals(idle), 'the face returns to its idle tint');
 });
