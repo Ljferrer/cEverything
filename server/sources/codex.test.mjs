@@ -210,16 +210,16 @@ test('C9 metaOf: a chat, a spawned agent with its parent, and a skipped guardian
   assert.equal(metaOf({ source: 'cli' }), null);
 });
 
-test('C10 read-only module with a module-level stop the relay can call; a bad root rejects', async () => {
+test('C10 read-only module with a module-level stop the relay can call; a bad root rejects', async (t) => {
   assert.equal(typeof codex.start, 'function');
   assert.equal(codex.sendCommand, undefined);
   const { tmp, root } = copyFixture();
   const { frames, handle } = await run({ root, pollMs: 20 });
+  t.after(() => handle.stop());
   codex.stop();
   const n = frames.length;
   fs.appendFileSync(chatFile(tmp), userMsg('after', 'after stop'));
   await sleep(100);
   assert.equal(frames.length, n);
-  handle.stop();
   await assert.rejects(start({ emit: () => {}, root: path.join(root, 'missing'), log: quiet }), /not a directory/);
 });
