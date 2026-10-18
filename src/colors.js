@@ -22,7 +22,7 @@ export const MONOLITH_RED = 0xff2a1a;
 
 // The Codex look: deep teal stone with bright teal edges, so a Codex chat reads
 // as another harness at a glance against the red hall.
-export const CODEX_STONE = 0x0f3a38;
+export const CODEX_STONE = 0x062220;
 export const CODEX_TEAL = 0x2ee6c9;
 
 const FALLBACK = 0x9e9e9e;
