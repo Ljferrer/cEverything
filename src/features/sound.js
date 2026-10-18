@@ -204,8 +204,8 @@ export function install({ bus, net }) {
     const [name, pylon] = cue.split(':');
     RECIPES[name]?.(synth, t, pylon);
   };
-  // A frame timeline.js re-emits to rebuild the room plays nothing.
-  const on = (type) => bus.addEventListener(type, (e) => !e.detail?.replayed && play(map(type, e.detail)));
+  // A frame timeline.js re-emits to rebuild the room plays nothing; a frame it steps through on Play sounds.
+  const on = (type) => bus.addEventListener(type, (e) => (!e.detail?.replayed || e.detail?.playback) && play(map(type, e.detail)));
   for (const type of ['select', 'miss', 'session', 'state', 'tool', 'talk', 'error']) on(type);
   if (net?.send) wrapSend(net, (cmd) => play(map('command', cmd)));
 

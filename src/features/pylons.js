@@ -152,7 +152,7 @@ export function install({ scene, bus, getObelisk = roomGetObelisk, load = loadTe
     const pylon = pylonFor(frame.name);
     if (frame.phase === 'start') {
       remember(frame.id, frame.args);
-      if (frame.replayed) return; // a timeline rebuild fires no projectile and lights no pylon
+      if (frame.replayed && !frame.playback) return; // a timeline rebuild fires no projectile; Play does
       const now = Date.now();
       // A slab past plan 1's MAX_VISIBLE cap (src/obelisk.js) is hidden and
       // keeps a stale position (its #layoutStack sets `slab.visible`), so a
