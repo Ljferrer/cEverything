@@ -77,7 +77,7 @@ test('a new child moves no sibling, and each stands in a row behind its parent',
   assert.ok(pos('k2').equals(k2));
   for (const k of ['k1', 'k2', 'k3']) {
     assert.ok(Math.abs(pos(k).x) > Math.abs(pos('p').x) + 1, `${k} on the far side of its parent from the aisle`);
-    assert.ok(Math.abs(pos(k).z - pos('p').z) <= 1.2 + 1e-9, `${k} within its parent's row length`);
+    assert.ok(Math.abs(pos(k).z - pos('p').z) <= 1.5 + 1e-9, `${k} within its parent's row length`);
   }
   assert.equal(mod.getObelisk('k3').scale.x, mod.CHILD_SCALE);
 });

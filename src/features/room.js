@@ -14,14 +14,14 @@ import { Obelisk } from '../obelisk.js';
 export const RING_RADIUS = 3; // distance to the first row (kept for callers)
 export const CHILD_RADIUS = 1; // reach of a child row around its parent (kept for callers)
 export const CHILD_SCALE = 0.6;
-// Root slots: alternate left and right of the aisle, 2.5 m from its center
+// Root slots: alternate left and right of the aisle, 2.8 m from its center
 // line, one pair every 4 m, starting 3 m ahead of the viewer.
-export const AISLE_OFFSET = 2.5;
+export const AISLE_OFFSET = 2.8;
 export const FIRST_ROW_Z = -3;
 export const ROW_GAP = 4;
-// Child slots: rows of four running along the aisle, 0.8 m apart, starting
+// Child slots: rows of four running along the aisle, 1 m apart, starting
 // 1.4 m outward from the parent and stepping 1 m further out per row.
-const CHILD_ALONG = Object.freeze([-1.2, -0.4, 0.4, 1.2]);
+const CHILD_ALONG = Object.freeze([-1.5, -0.5, 0.5, 1.5]);
 const CHILD_FIRST_ROW = 1.4;
 const CHILD_ROW_GAP = 1;
 const STORE_KEY = 'obelisks.slots.v3'; // v3: aisle slots; older maps are ignored
