@@ -34,6 +34,8 @@ export function legendSections() {
     {
       title: 'Controls',
       rows: [
+        { label: 'W A S D or arrows: walk (Shift runs, Q/E down/up)' },
+        { label: 'Drag: look around. Wheel: zoom toward the mouse' },
         { label: 'Click a slab: select that chat' },
         { label: 'Click a base: fork the chat' },
         { label: 'Slab, then another base: pipe that message' },
