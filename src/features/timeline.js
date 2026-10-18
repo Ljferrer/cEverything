@@ -6,6 +6,8 @@
 // moment while pylons.js and sound.js stay quiet. While scrubbed back,
 // `bus.scrubbed` is true: live frames keep recording, and room.js and
 // pylons.js ignore them. LIVE re-renders up to the newest frame and resumes.
+// Frames replay in the order things happened (`ordered`), every chat
+// interleaved by wall time, not in the order the relay sent them.
 // Play moves forward from the scrubbed frame at the recorded pace (each gap
 // capped at MAX_PLAY_GAP_MS, then divided by the speed slider's SPEEDS step)
 // and goes live at the newest frame; Pause holds.
@@ -25,8 +27,35 @@ export const DEFAULT_SPEED = 2;
 /** The server frames the timeline records and replays. */
 export const FRAME_TYPES = Object.freeze(['session', 'slab', 'delta', 'state', 'tool']);
 
-/** A log entry's time: the frame's own `ts` if it has one, else its arrival time. */
-export const timeOf = (entry) => entry.frame?.ts ?? entry.at;
+/** A log entry's time: when it happened (its `key`, see `ordered`), else its own `ts`, else its arrival time. */
+export const timeOf = (entry) => entry.key ?? entry.frame?.ts ?? entry.at;
+
+/**
+ * The log in the order things happened, not the order they arrived. The relay
+ * backfills history chat by chat, so arrival order plays one chat at a time;
+ * this order interleaves every chat by wall time, so simultaneous work plays
+ * together. Each entry gets a `key` (ms): a slab's own `ts`; a session just
+ * before its first slab; any other frame (delta, state, tool) the key of the
+ * frame before it from the same chat, so a tool start follows its tool slab;
+ * the arrival time when a chat has no timed frame yet. Ties keep arrival order.
+ */
+export function ordered(log) {
+  const first = new Map(); // sid -> earliest slab ts
+  for (const e of log) {
+    const { sid, ts } = e.frame ?? {};
+    if (sid != null && typeof ts === 'number') first.set(sid, Math.min(first.get(sid) ?? Infinity, ts));
+  }
+  const last = new Map(); // sid -> key of its latest frame so far, in arrival order
+  log.forEach((e, i) => {
+    const { sid, ts } = e.frame ?? {};
+    if (typeof ts === 'number') e.key = ts;
+    else if (e.type === 'session') e.key = first.has(sid) ? first.get(sid) - 1e-3 : e.at;
+    else e.key = last.get(sid) ?? first.get(sid) ?? e.at;
+    e.seq = i;
+    if (sid != null) last.set(sid, e.key);
+  });
+  return [...log].sort((a, b) => a.key - b.key || a.seq - b.seq);
+}
 
 /**
  * The `tool` start a tool slab stands for: both sources write a tool slab as
@@ -46,34 +75,49 @@ export function toolStartFor(frame) {
  * `reset` clears the room before each rebuild; `now` stamps arrival times.
  */
 export function createTimeline(bus, { reset = () => {}, now = Date.now } = {}) {
-  const log = [];
+  const arrived = []; // every frame, in arrival order
+  let view = null; // `arrived` in the order things happened, rebuilt on demand after a new frame
   const started = new Set(); // ids of the tool starts in the log
   let shownAt = null; // index of the frame shown while scrubbed back, else null (live)
   const record = (e) => {
     if (e.detail?.replayed) return;
-    log.push({ type: e.type, frame: e.detail, at: now() });
+    arrived.push({ type: e.type, frame: e.detail, at: now() });
+    view = null;
     if (e.type === 'tool' && e.detail?.phase === 'start') started.add(e.detail.id);
   };
   for (const type of FRAME_TYPES) bus.addEventListener(type, record);
+  const log = () => (view ??= ordered(arrived));
 
   const show = (k) => {
     reset();
-    for (let i = 0; i <= k; i++) bus.emit(log[i].type, { ...log[i].frame, replayed: true });
+    const l = log();
+    for (let i = 0; i <= k; i++) bus.emit(l[i].type, { ...l[i].frame, replayed: true });
   };
 
   const timeline = {
-    log,
+    /** Every recorded frame, in the order things happened (see `ordered`). */
+    get log() {
+      return log();
+    },
+    /** How many frames are recorded; cheap, for the live view. */
+    get size() {
+      return arrived.length;
+    },
+    /** The latest frame to arrive, the one on show while live. */
+    get newest() {
+      return arrived.at(-1);
+    },
     /** The index of the frame on show: the scrubbed one, else the newest. */
     get index() {
-      return shownAt ?? log.length - 1;
+      return shownAt ?? arrived.length - 1;
     },
     get live() {
       return shownAt === null;
     },
     scrubTo(k) {
-      if (!log.length) return;
-      k = Math.max(0, Math.min(log.length - 1, Math.round(k)));
-      if (k === log.length - 1) return timeline.goLive();
+      if (!arrived.length) return;
+      k = Math.max(0, Math.min(arrived.length - 1, Math.round(k)));
+      if (k === arrived.length - 1) return timeline.goLive();
       shownAt = k;
       bus.scrubbed = true;
       show(k);
@@ -81,11 +125,11 @@ export function createTimeline(bus, { reset = () => {}, now = Date.now } = {}) {
     /** While scrubbed, show frame k + 1 by emitting only that frame; at the newest frame, go live. */
     advance() {
       if (shownAt === null) return;
-      if (shownAt + 1 >= log.length - 1) return timeline.goLive();
+      if (shownAt + 1 >= arrived.length - 1) return timeline.goLive();
       shownAt += 1;
       // Playback steps one frame at a time, so it animates and sounds like live (`playback`);
       // a rebuild (scrub, LIVE) re-emits frames in bulk and stays silent.
-      const { type, frame } = log[shownAt];
+      const { type, frame } = log()[shownAt];
       bus.emit(type, { ...frame, replayed: true, playback: true });
       const start = toolStartFor(frame);
       if (start && !started.has(start.id)) bus.emit('tool', { ...start, replayed: true, playback: true });
@@ -94,7 +138,7 @@ export function createTimeline(bus, { reset = () => {}, now = Date.now } = {}) {
       if (shownAt === null) return;
       shownAt = null;
       bus.scrubbed = false;
-      show(log.length - 1);
+      show(arrived.length - 1);
     },
     stop() {
       for (const type of FRAME_TYPES) bus.removeEventListener(type, record);
@@ -104,15 +148,14 @@ export function createTimeline(bus, { reset = () => {}, now = Date.now } = {}) {
 }
 
 /**
- * The playback wait after frame k, between 0 and MAX_PLAY_GAP_MS: the `ts` gap
- * to frame k + 1 when both carry one, else the arrival gap. The relay backfill
- * lands all history at once, so only `ts` keeps its pace.
+ * The playback wait after frame k, between 0 and MAX_PLAY_GAP_MS: the time
+ * between frame k and frame k + 1 (`timeOf`). The relay backfill lands all
+ * history at once, so only the frames' own times keep its pace.
  */
 export function playGap(log, k) {
   const a = log[k];
   const b = log[k + 1];
-  const both = a?.frame?.ts != null && b?.frame?.ts != null;
-  const gap = both ? b.frame.ts - a.frame.ts : (b?.at ?? 0) - (a?.at ?? 0);
+  const gap = a && b ? timeOf(b) - timeOf(a) : 0;
   return Math.max(0, Math.min(MAX_PLAY_GAP_MS, gap));
 }
 
@@ -188,7 +231,7 @@ export async function install({ bus }) {
   const player = createPlayer(timeline, { onTick: () => render(), speed });
 
   const render = () => {
-    const n = timeline.log.length;
+    const n = timeline.size; // live, the bar never sorts the log; only a scrub or Play does
     const k = timeline.index;
     slider.max = String(Math.max(0, n - 1));
     if (pending === null) slider.value = String(Math.max(0, k)); // never yank the thumb mid-drag
@@ -196,7 +239,8 @@ export async function install({ bus }) {
     playButton.disabled = timeline.live;
     playButton.textContent = player.playing ? '⏸' : '▶';
     playButton.setAttribute('aria-label', player.playing ? 'Pause' : 'Play');
-    time.textContent = n ? `${clock(timeOf(timeline.log[k]))} · ${k + 1}/${n}` : 'no frames';
+    const entry = timeline.live ? timeline.newest : timeline.log[k];
+    time.textContent = n ? `${clock(timeOf(entry))} · ${k + 1}/${n}` : 'no frames';
   };
 
   // One rebuild per animation frame, however fast the slider moves.
