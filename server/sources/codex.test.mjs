@@ -159,16 +159,16 @@ test('C6 a long rollout seeds from its tail and still titles from its head', asy
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'obelisks-codex-big-'));
   const sid = '019a0000-0000-7000-8000-0000000000bb';
   const pad = line('event_msg', { type: 'token_count', info: { note: 'x'.repeat(200) } });
-  let body = meta(sid) + userMsg('first', 'Start the long task') + pad.repeat(400);
-  for (let i = 0; i < 50; i++) body += userMsg(`late${i}`, `late message ${i}`);
+  // A whole-file read would seed all 36 messages (under SEED_LINES); the 8 KB tail holds only the last 5.
+  let body = meta(sid) + userMsg('first', 'Start the long task');
+  for (let i = 0; i < 30; i++) body += userMsg(`mid${i}`, `middle message ${i}`);
+  body += pad.repeat(400);
+  for (let i = 0; i < 5; i++) body += userMsg(`late${i}`, `late message ${i}`);
   fs.writeFileSync(path.join(tmp, `rollout-2026-10-17T21-00-00-${sid}.jsonl`), body);
   const { frames, handle } = await run({ root: tmp, seedBytes: 8 * 1024 });
   t.after(() => handle.stop());
   assert.equal(frames[0].title, 'Start the long task');
-  const slabs = frames.filter((f) => f.t === 'slab');
-  assert.ok(slabs.length > 0 && slabs.length < 50, `seeded ${slabs.length}`);
-  assert.equal(slabs.at(-1).id, 'late49');
-  assert.ok(!slabs.some((f) => f.id === 'first'));
+  assert.deepEqual(frames.filter((f) => f.t === 'slab').map((f) => f.id), ['late0', 'late1', 'late2', 'late3', 'late4']);
 });
 
 test('C7 two history segments of one thread track only the newer file', async (t) => {
