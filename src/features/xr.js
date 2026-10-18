@@ -13,7 +13,9 @@ import { hitToEvent, applySelection, rootOf } from '../input.js';
 const SESSION_INIT = { optionalFeatures: ['local-floor', 'bounded-floor'] };
 
 export function install({ scene, camera, renderer, bus }) {
-  document.body.appendChild(VRButton.createButton(renderer, SESSION_INIT));
+  const vrButton = VRButton.createButton(renderer, SESSION_INIT);
+  document.body.appendChild(vrButton);
+  hideWhenUnsupported(vrButton);
 
   const raycaster = new THREE.Raycaster();
   const rotation = new THREE.Matrix4();
@@ -92,4 +94,19 @@ function installAudioWorkaround() {
   };
   Patched.__obelisksResume = true;
   globalThis.AudioContext = Patched;
+}
+
+/** True for VRButton's text on a device with no VR (laptop, phone), where the button only clutters the view. */
+export function isUnsupportedLabel(text) {
+  return /NOT SUPPORTED|NOT ALLOWED|NOT AVAILABLE/i.test(String(text ?? ''));
+}
+
+// VRButton fills in its label after an async support check, so watch it and
+// hide the button once it says VR is not available here.
+function hideWhenUnsupported(button) {
+  const check = () => {
+    if (isUnsupportedLabel(button.textContent)) button.style.display = 'none';
+  };
+  check();
+  new MutationObserver(check).observe(button, { childList: true, characterData: true, subtree: true });
 }
