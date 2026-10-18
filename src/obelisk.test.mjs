@@ -471,3 +471,17 @@ test('past its detail range an obelisk shows only its monolith, and its slabs co
   cherub.update(cameraAt(CHERUB_DETAIL_M + 1));
   assert.equal(cherub.detail, false, 'a cherub drops its detail much sooner');
 });
+
+test('a far Codex obelisk detaches its glyph and CODEX line and keeps its teal monolith', async () => {
+  const { DETAIL_M } = await import('./obelisk.js');
+  const o = new Obelisk({ sid: 'far-codex', title: 'c', status: 'idle', harness: 'codex' });
+  o.update(cameraAt(DETAIL_M + 5));
+  assert.equal(o.detail, false);
+  assert.equal(o.glyph.parent, null);
+  assert.equal(o.sound.parent, null);
+  assert.equal(o.body.parent, o);
+  assert.equal(o.body.material, CODEX_BODY_MATERIAL);
+  o.update(cameraAt(1));
+  assert.equal(o.glyph.parent, o);
+  assert.equal(o.sound.text, 'CODEX');
+});
