@@ -2,10 +2,11 @@
 // selected obelisk to record, release to send: `selectstart` arms a
 // MediaRecorder on the mic stream grabbed at the VRButton click, `selectend`
 // stops it and ships the blob as a data URL in plan 1's `voice` command. A
-// press under 300 ms, or an empty blob, is a plain select and sends nothing
-// (PIN-61). Transcription happens in the relay; this file never names the
-// token, an STT key, or the transcribe route. Laptop mode has no `selectstart`
-// on the bus, so the feature is inert there.
+// press released before the 300 ms hold timer runs, or an empty blob, is a
+// plain select and sends nothing (PIN-61). Transcription happens in the
+// relay; this file never names the token, an STT key, or the transcribe
+// route. Laptop mode has no `selectstart` on the bus, so the feature is inert
+// there.
 //
 // Bus surface: reads `mode` (`canEdit`), `selectstart`, `selectend`, `error`;
 // sets `bus.talking` to the sid once a hold passes 300 ms and clears it on
@@ -18,9 +19,10 @@ const ERROR_WINDOW_MS = 10_000;
 const MIME_CANDIDATES = ['audio/webm;codecs=opus', 'audio/mp4'];
 const GLYPH_TEXT = '● REC';
 
-/** The mic stream, requested once at the VRButton click and kept for the page lifetime (PIN-62). */
+/** The mic stream, requested at the VRButton click and kept while its audio track is live (PIN-62). */
 let stream = null;
-let streamRequested = false;
+/** The pending mic request, shared by every click that lands while it runs, or null. */
+let streamRequest = null;
 
 export function install({ scene, camera, renderer, bus, net }) {
   installMic();
@@ -41,7 +43,8 @@ export function install({ scene, camera, renderer, bus, net }) {
   bus.addEventListener('selectstart', (e) => {
     const sid = e.detail?.sid ?? null;
     if (sid == null || sid !== bus.selected || !canEdit || rec) return;
-    if (!stream) {
+    const live = liveStream();
+    if (!live) {
       talk('error', sid);
       console.log('voice: no mic stream');
       return;
@@ -52,7 +55,7 @@ export function install({ scene, camera, renderer, bus, net }) {
     let recorder;
     let take = null;
     try {
-      recorder = new MediaRecorder(stream, chosen ? { mimeType: chosen } : undefined);
+      recorder = new MediaRecorder(live, chosen ? { mimeType: chosen } : undefined);
       recorder.addEventListener('dataavailable', (ev) => {
         if (ev.data && ev.data.size > 0) chunks.push(ev.data);
       });
@@ -71,7 +74,13 @@ export function install({ scene, camera, renderer, bus, net }) {
       mime: recorder.mimeType || chosen || '',
       startedAt: performance.now(),
       heldMs: 0,
-      holdTimer: setTimeout(() => (bus.talking = sid), HOLD_MS),
+      // The send decision reads `talking`, so it always agrees with what
+      // plan 6's fork read from `bus.talking` on the release `select`.
+      talking: false,
+      holdTimer: setTimeout(() => {
+        take.talking = true;
+        bus.talking = sid;
+      }, HOLD_MS),
       recognizer: startRecognizer(glyph),
     };
     glyph.show(GLYPH_TEXT);
@@ -128,7 +137,7 @@ export function install({ scene, camera, renderer, bus, net }) {
     }
     const { sid, mime, heldMs: ms } = take;
     const blob = new Blob(take.chunks, { type: mime });
-    if (ms < HOLD_MS || blob.size === 0) {
+    if (!take.talking || blob.size === 0) {
       rec = null;
       glyph.hide();
       talk('dropped', sid, ms);
@@ -221,25 +230,34 @@ function installMic() {
   );
 }
 
-/** Request the mic once; resolves true when a stream is held. */
-async function requestStream() {
-  if (stream) return true;
-  if (streamRequested) return false;
-  streamRequested = true;
-  try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    return true;
-  } catch (err) {
-    streamRequested = false;
-    console.log('voice: mic denied', err?.message ?? err);
-    return false;
-  }
+/** The held stream if an audio track is still live, else null (an ended track drops it). */
+function liveStream() {
+  if (stream && !stream.getAudioTracks().some((track) => track.readyState === 'live')) stream = null;
+  return stream;
+}
+
+/** Request the mic unless a live stream is held; resolves true when one is. */
+function requestStream() {
+  if (liveStream()) return Promise.resolve(true);
+  // `finally` runs in a later microtask, so it clears the request after this assignment.
+  streamRequest ??= (async () => {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      return true;
+    } catch (err) {
+      console.log('voice: mic denied', err?.message ?? err);
+      return false;
+    }
+  })().finally(() => (streamRequest = null));
+  return streamRequest;
 }
 
 /** The recorder mime: the first supported candidate, else `''` for the recorder default (PIN-63). */
 function pickMime() {
-  if (typeof MediaRecorder?.isTypeSupported !== 'function') return '';
-  return MIME_CANDIDATES.find((m) => MediaRecorder.isTypeSupported(m)) ?? '';
+  // Read through globalThis: `typeof MediaRecorder?.x` throws when the global is undeclared.
+  const Recorder = globalThis.MediaRecorder;
+  if (typeof Recorder?.isTypeSupported !== 'function') return '';
+  return MIME_CANDIDATES.find((m) => Recorder.isTypeSupported(m)) ?? '';
 }
 
 function readAsDataUrl(blob) {
@@ -326,8 +344,10 @@ function startRecognizer(glyph) {
   }
 }
 
+// Detach `onresult` first: a final result can still arrive after stop().
 function stopRecognizer(recognizer) {
   try {
+    if (recognizer) recognizer.onresult = null;
     recognizer?.stop();
   } catch {
     // swallowed: the recognizer is a bonus
