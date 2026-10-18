@@ -85,6 +85,88 @@ test('start rejects on a missing recording so the relay falls back', async () =>
   await assert.rejects(replay.start({ emit: () => {}, argv: ['--replay', '/nonexistent/recording.jsonl', '--fast'], env: {} }));
 });
 
+/** Collect emitted frames until `n` arrive or `ms` pass. */
+async function collect(argv, n, ms = 1000) {
+  const frames = [];
+  const logs = [];
+  await replay.start({ emit: (f) => frames.push(f), argv, env: {}, log: (...a) => logs.push(a.join(' ')) });
+  const t0 = Date.now();
+  await new Promise((resolve, reject) => {
+    const tick = () => {
+      if (frames.length >= n) return resolve();
+      if (Date.now() - t0 > ms) return reject(new Error(`only ${frames.length} of ${n} frames within ${ms} ms`));
+      setTimeout(tick, 5);
+    };
+    tick();
+  });
+  replay.stop();
+  return { frames, logs };
+}
+
+const fixtureEntries = () => replay.parseRecording(fixtureLines().map((l) => JSON.stringify(l)).join('\n'));
+/** The fixture's gaps at speed 1: line deltas, slab deltas, and 300 ms for the bare `state` and `delta`. */
+const SPEED_1_GAPS = [0, 0, 1500, 1500, 1000, 300, 1000, 300];
+
+test('speed 1 keeps the recorded pacing, and the default is speed 1', () => {
+  assert.deepEqual(replay.gaps(fixtureEntries(), false, 1), SPEED_1_GAPS);
+  assert.deepEqual(replay.gaps(fixtureEntries(), false), SPEED_1_GAPS);
+});
+
+test('speed 2 halves every gap, the 300 ms no-ts default included; speed 0.5 doubles them', () => {
+  assert.deepEqual(replay.gaps(fixtureEntries(), false, 2), SPEED_1_GAPS.map((g) => g / 2));
+  assert.ok(replay.gaps(fixtureEntries(), false, 2).includes(150), 'a --record file without ts plays at 150 ms per frame');
+  assert.deepEqual(replay.gaps(fixtureEntries(), false, 0.5), SPEED_1_GAPS.map((g) => g * 2));
+});
+
+test('speedFrom reads --speed <x>, --speed=<x>, then OBELISKS_REPLAY_SPEED; a bad value logs and falls back to 1', () => {
+  assert.equal(replay.speedFrom([], {}), 1);
+  assert.equal(replay.speedFrom(['--speed', '2'], {}), 2);
+  assert.equal(replay.speedFrom(['--speed=0.5'], {}), 0.5);
+  assert.equal(replay.speedFrom([], { OBELISKS_REPLAY_SPEED: '3' }), 3);
+  assert.equal(replay.speedFrom(['--speed', '4'], { OBELISKS_REPLAY_SPEED: '3' }), 4, 'the flag wins over env');
+  for (const [argv, env] of [[['--speed', '0'], {}], [['--speed', '-2'], {}], [['--speed=abc'], {}], [['--speed', 'Infinity'], {}], [['--speed'], {}], [[], { OBELISKS_REPLAY_SPEED: 'fast' }]]) {
+    const logs = [];
+    assert.equal(replay.speedFrom(argv, env, (m) => logs.push(m)), 1, JSON.stringify({ argv, env }));
+    assert.equal(logs.length, 1, `logged once for ${JSON.stringify({ argv, env })}`);
+    assert.match(logs[0], /using 1/);
+  }
+});
+
+test('--fast beats --speed: speed 0.01 would take minutes, --fast plays every frame within one second', async () => {
+  const file = await writeFixture(fixtureLines());
+  assert.deepEqual(replay.gaps(fixtureEntries(), true, 0.01), SPEED_1_GAPS.map(() => replay.FAST_GAP_MS));
+  const { frames, logs } = await collect(['--replay', file, '--speed', '0.01', '--fast'], 9);
+  assert.equal(frames.length, 9);
+  assert.ok(logs.some((l) => l.includes('--fast')), `logged the speed in use: ${JSON.stringify(logs)}`);
+});
+
+test('start logs the speed in use', async () => {
+  const file = await writeFixture(fixtureLines());
+  const logs = [];
+  await replay.start({ emit: () => {}, argv: ['--replay', file, '--speed', '2'], env: {}, log: (...a) => logs.push(a.join(' ')) });
+  replay.stop();
+  assert.ok(logs.some((l) => l.includes('speed: 2x')), JSON.stringify(logs));
+});
+
+test('--loop replays the frames again from the top without a second session frame per sid', async () => {
+  const file = await writeFixture(fixtureLines());
+  const once = fixtureLines().map(frameOf).filter((f) => f.t !== 'mode');
+  const again = once.filter((f) => f.t !== 'session');
+  const { frames } = await collect(['--replay', file, '--fast', '--loop'], 1 + once.length + 2 * again.length);
+  assert.deepEqual(frames[0], { t: 'mode', mode: 'replay' });
+  assert.deepEqual(frames.slice(1), [...once, ...again, ...again]);
+  for (const sid of ['r1', 'r2', 'r3']) assert.equal(frames.filter((f) => f.t === 'session' && f.sid === sid).length, 1, sid);
+  assert.equal(replay.slabText('r2', 'b1'), 'an answer continued', 'a looped slab restarts its text before the delta');
+});
+
+test('without --loop the replay stops after one pass', async () => {
+  const file = await writeFixture(fixtureLines());
+  const frames = [];
+  await replay.start({ emit: (f) => frames.push(f), argv: ['--replay', file, '--fast'], env: {}, log: () => {} });
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(frames.length, 9);
+});
+
 /** Connect to the relay and record every frame; `until` waits for a predicate over them. */
 function connect(port) {
   const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
