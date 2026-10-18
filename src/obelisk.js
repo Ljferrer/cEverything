@@ -34,6 +34,11 @@ export const MAX_VISIBLE = 40;
 export const TITLE_SIZE = 0.09;
 export const MAX_KEPT = 200; // older slabs are disposed; the relay caches the same count
 export const CHERUB_KEPT = 4; // a subagent keeps only its last few slabs, so a swarm of hundreds stays light
+// Past its detail range an obelisk shows only its monolith (base, body, edges):
+// the slabs, title, glyph and SOUND ONLY line leave the scene graph, so they
+// cost no draw calls and no matrix updates. The range is in cone-scaled meters.
+export const DETAIL_M = 40;
+export const CHERUB_DETAIL_M = 8;
 export const BODY_WIDTH = 1.65;
 export const BODY_DEPTH = 0.06;
 export const GLYPH_SIZE = 0.2;
@@ -148,6 +153,9 @@ export class Obelisk extends THREE.Group {
     this.status = session.status;
     this.userData = { sid: session.sid, kind: 'obelisk' };
     this.maxKept = session.parent ? CHERUB_KEPT : MAX_KEPT;
+    this.detailRange = session.parent ? CHERUB_DETAIL_M : DETAIL_M;
+    /** False while the viewer is past `detailRange`: then only the monolith shows. */
+    this.detail = true;
     /** @type {Array<THREE.Group & {slabId:string, role:string, full:string, band:string|null, text:Text, bar:THREE.Mesh}>} */
     this.slabs = [];
     this.toolCount = 0;
@@ -300,11 +308,23 @@ export class Obelisk extends THREE.Group {
     _toSelf.y = 0;
     const flat = camera.isCamera && _fwd.lengthSq() > 1e-6 && _toSelf.lengthSq() > 1e-6;
     const scale = flat ? coneScale(_fwd.normalize().dot(_toSelf.normalize())) : 1;
+    this.#setDetail(_selfPos.distanceTo(_camPos) * scale <= this.detailRange);
+    if (!this.detail) return;
     for (const slab of this.slabs) {
       if (!slab.visible) continue;
       slab.getWorldPosition(_slabPos);
       const band = lod(_slabPos.distanceTo(_camPos) * scale, slab.full.length, slab.band);
       if (band !== slab.band) this.#apply(slab, band);
+    }
+  }
+
+  /** Attach or detach the detail parts; a detached part keeps its state and layout for when it returns. */
+  #setDetail(on) {
+    if (on === this.detail) return;
+    this.detail = on;
+    for (const part of [this.stack, this.title, this.glyph, this.sound]) {
+      if (on) this.add(part);
+      else this.remove(part);
     }
   }
 

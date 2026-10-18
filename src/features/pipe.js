@@ -50,7 +50,8 @@ export function install(ctx) {
 
 function drawLine(scene, getObelisk, { from, to, slab }) {
   const source = getObelisk(from);
-  const start = source?.slabs?.find((s) => s.slabId === slab) ?? baseOf(source);
+  const shown = source?.detail !== false ? source?.slabs?.find((s) => s.slabId === slab) : null; // a distant obelisk shows no slabs
+  const start = shown ?? baseOf(source);
   const end = baseOf(getObelisk(to));
   if (!start || !end) return;
   const points = [start.getWorldPosition(new THREE.Vector3()), end.getWorldPosition(new THREE.Vector3())];
