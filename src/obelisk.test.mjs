@@ -28,7 +28,7 @@ registerHooks({
 });
 
 const { Text } = await import('troika-three-text');
-const { Obelisk, STACK_BOTTOM, TITLE_SIZE, BASE_HEIGHT, MIN_BODY_TOP, CARD_PAD, glyphFor } = await import('./obelisk.js');
+const { Obelisk, SLAB_WIDTH, STACK_BOTTOM, TITLE_SIZE, BASE_HEIGHT, MIN_BODY_TOP, CARD_PAD, glyphFor } = await import('./obelisk.js');
 const { BAR_HEIGHT, SLAB_GAP } = await import('./stack.js');
 const { stateColor, MONOLITH_BLACK, ROLE_COLORS } = await import('./colors.js');
 
@@ -356,4 +356,13 @@ test('the forward cone: a real camera facing an obelisk reads it in full, facing
   cam.updateMatrixWorld(true);
   o.update(cam);
   assert.equal(o.slabs[0].band, 'far');
+});
+
+test('slab text wraps long unbroken words inside the slab width', () => {
+  const o = new Obelisk({ sid: 'wrap', title: 'T', status: 'idle' });
+  o.addSlab({ id: 'w1', role: 'tool', text: '/a/very/long/path/'.repeat(20) });
+  const text = o.slabs[0].text;
+  assert.equal(text.overflowWrap, 'break-word');
+  assert.equal(text.maxWidth, SLAB_WIDTH);
+  assert.equal(o.title.overflowWrap, 'break-word');
 });
