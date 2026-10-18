@@ -59,3 +59,41 @@ test('ES9a createPool caps live spheres at 32 and recycles the oldest under a bu
   pool.dispose();
   assert.equal(parent.children.length, 0, 'dispose detaches the group');
 });
+
+test('a long flight arcs higher: the lift grows with the chord, never below LIFT', async () => {
+  const { LIFT, LIFT_PER_M } = await import('./projectile.js');
+  const lift = (to) => curvePoint(0.5, { x: 0, y: 0, z: 0 }, to).y;
+  assert.ok(Math.abs(lift({ x: 2, y: 0, z: 0 }) - LIFT / 2) < 1e-9, 'a short flight keeps the LIFT floor');
+  assert.ok(Math.abs(lift({ x: 30, y: 0, z: 0 }) - (LIFT_PER_M * 30) / 2) < 1e-9, 'a 30 m flight lifts by its share of the chord');
+});
+
+test('a tracer grows behind the sphere, holds after it lands, then fades out and hides', async () => {
+  const THREE3 = await import('three');
+  const { createTracers, traceOpacity, tracePoints, TRACE_SEGMENTS, TRACE_HOLD_MS, TRACE_FADE_MS, TRACE_OPACITY } = await import('./projectile.js');
+  assert.equal(tracePoints(0), 2);
+  assert.equal(tracePoints(FLIGHT_MS / 2), TRACE_SEGMENTS / 2 + 1);
+  assert.equal(tracePoints(FLIGHT_MS * 3), TRACE_SEGMENTS + 1, 'the whole arc shows once the sphere lands');
+  assert.equal(traceOpacity(FLIGHT_MS + TRACE_HOLD_MS), TRACE_OPACITY, 'full strength through the hold');
+  assert.ok(Math.abs(traceOpacity(FLIGHT_MS + TRACE_HOLD_MS + TRACE_FADE_MS / 2) - TRACE_OPACITY / 2) < 1e-9);
+
+  const parent = new THREE3.Group();
+  const tracers = createTracers({ THREE: THREE3, parent, size: 2 });
+  const from = { x: 0, y: 1, z: 0 };
+  const to = { x: 20, y: 7, z: -10 };
+  const line = tracers.trace(from, to, 1000);
+  assert.equal(line.visible, true);
+  const pos = line.geometry.getAttribute('position');
+  assert.deepEqual([pos.getX(0), pos.getY(0), pos.getZ(0)], [0, 1, 0], 'the tracer starts at the tool call');
+  assert.deepEqual([pos.getX(TRACE_SEGMENTS), pos.getY(TRACE_SEGMENTS), pos.getZ(TRACE_SEGMENTS)], [20, 7, -10], 'and ends at the pylon');
+  tracers.update(1000 + FLIGHT_MS / 2);
+  assert.equal(line.geometry.drawRange.count, TRACE_SEGMENTS / 2 + 1, 'half drawn at half flight');
+  tracers.update(1000 + FLIGHT_MS + 100);
+  assert.equal(line.visible, true, 'it stays after the sphere lands');
+  assert.equal(line.material.opacity, TRACE_OPACITY);
+  tracers.update(1000 + FLIGHT_MS + TRACE_HOLD_MS + TRACE_FADE_MS);
+  assert.equal(line.visible, false, 'it hides once faded');
+  assert.equal(tracers.liveCount(), 0);
+  tracers.trace(from, to, 2000);
+  tracers.trace(from, to, 2001);
+  assert.equal(tracers.trace(from, to, 2002), line, 'a full set reuses the oldest tracer');
+});
