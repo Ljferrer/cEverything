@@ -1,11 +1,12 @@
-// The shared room (PIN-22 seam): a floor grid, one obelisk per `session` on a
-// walkable grid of fixed slots (rows of three, 4 m apart, receding from the
-// viewer), children in short rows behind their parent at 0.6 scale with one
-// floor label per shared `phase` (PIN-21). A session takes the next free slot
-// when first seen and keeps it, so nothing ever moves: the room is spatial
-// memory. The sid -> slot map lives in localStorage, so a reload puts every
-// known sid back where it was. Routes `slab`, `delta`, and `state` to the
-// matching obelisk. Later plans read `getObelisk(sid)` and `allObelisks()`.
+// The shared room (PIN-22 seam): a floor grid and one obelisk per `session`
+// along a single walking aisle. The aisle runs straight ahead of the viewer
+// (-z); chats alternate left and right of it, so one walk down the aisle
+// passes every chat. Children stand in short rows on the far side of their
+// parent, away from the aisle, at 0.6 scale, with one floor label per shared
+// `phase` (PIN-21). A session takes the next free slot when first seen and
+// keeps it, so nothing ever moves: the room is spatial memory. The sid -> slot
+// map lives in localStorage, so a reload puts every known sid back where it
+// was. Routes `slab`, `delta`, and `state` to the matching obelisk.
 import * as THREE from 'three';
 import { Text } from 'troika-three-text';
 import { Obelisk } from '../obelisk.js';
@@ -13,16 +14,17 @@ import { Obelisk } from '../obelisk.js';
 export const RING_RADIUS = 3; // distance to the first row (kept for callers)
 export const CHILD_RADIUS = 1; // reach of a child row around its parent (kept for callers)
 export const CHILD_SCALE = 0.6;
-// Root slots: rows of three columns, center first, 4 m between columns and 5 m
-// between rows, so there is room to walk between obelisks and their children.
-export const GRID_COLUMNS = Object.freeze([0, -4, 4]);
+// Root slots: alternate left and right of the aisle, 2.5 m from its center
+// line, one pair every 4 m, starting 3 m ahead of the viewer.
+export const AISLE_OFFSET = 2.5;
 export const FIRST_ROW_Z = -3;
-export const ROW_GAP = 5;
-// Child slots: rows of four behind the parent, 0.8 m apart.
-const CHILD_COLUMNS = Object.freeze([-1.2, -0.4, 0.4, 1.2]);
-const CHILD_FIRST_ROW = 1.4; // meters behind the parent
+export const ROW_GAP = 4;
+// Child slots: rows of four running along the aisle, 0.8 m apart, starting
+// 1.4 m outward from the parent and stepping 1 m further out per row.
+const CHILD_ALONG = Object.freeze([-1.2, -0.4, 0.4, 1.2]);
+const CHILD_FIRST_ROW = 1.4;
 const CHILD_ROW_GAP = 1;
-const STORE_KEY = 'obelisks.slots.v2'; // v2: grid slots; ring-era maps are ignored
+const STORE_KEY = 'obelisks.slots.v3'; // v3: aisle slots; older maps are ignored
 
 /** @type {Map<string, Obelisk>} */
 const obelisks = new Map();
@@ -113,16 +115,16 @@ function childSlot(sid, parent) {
 }
 
 export function rootSlotPoint(n) {
-  const col = n % GRID_COLUMNS.length;
-  const row = Math.floor(n / GRID_COLUMNS.length);
-  return { x: GRID_COLUMNS[col], z: FIRST_ROW_Z - row * ROW_GAP };
+  const side = n % 2 === 0 ? -1 : 1; // first chat on the left
+  return { x: side * AISLE_OFFSET, z: FIRST_ROW_Z - Math.floor(n / 2) * ROW_GAP };
 }
 
-/** Child slot n behind a parent at (px, pz), scaled with the parent. */
+/** Child slot n of a parent at (px, pz): rows along the aisle, on the far side from it. */
 export function childSlotPoint(n, px, pz, scale = 1) {
-  const col = n % CHILD_COLUMNS.length;
-  const row = Math.floor(n / CHILD_COLUMNS.length);
-  return { x: px + CHILD_COLUMNS[col] * scale, z: pz - (CHILD_FIRST_ROW + row * CHILD_ROW_GAP) * scale };
+  const out = px < 0 ? -1 : 1; // away from the aisle center line
+  const along = CHILD_ALONG[n % CHILD_ALONG.length];
+  const row = Math.floor(n / CHILD_ALONG.length);
+  return { x: px + out * (CHILD_FIRST_ROW + row * CHILD_ROW_GAP) * scale, z: pz + along * scale };
 }
 
 
@@ -183,9 +185,9 @@ function placeChildren(parent, all, seen) {
       phaseLabels.set(key, label);
       room.add(label);
     }
-    // The label lies on the floor just in front of its children's rows.
-    const x = points.reduce((sum, q) => sum + q.x, 0) / points.length;
-    const z = Math.max(...points.map((q) => q.z)) + 0.45 * parent.scale.x;
-    label.position.set(x, 0.01, z);
+    // The label lies on the floor between the parent and its children's rows.
+    const z = points.reduce((sum, q) => sum + q.z, 0) / points.length;
+    const nearest = points.reduce((a, q) => (Math.abs(q.x - parent.position.x) < Math.abs(a.x - parent.position.x) ? q : a));
+    label.position.set((nearest.x + parent.position.x) / 2, 0.01, z);
   }
 }

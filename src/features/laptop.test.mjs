@@ -24,7 +24,7 @@ registerHooks({
   },
 });
 
-const { showErrors, showTarget, ERROR_MS, LAPTOP_START } = await import('./laptop.js');
+const { showErrors, showTarget, ERROR_MS, LAPTOP_START, LAPTOP_TARGET } = await import('./laptop.js');
 const { RING_RADIUS, CHILD_RADIUS } = await import('./room.js');
 
 function fakeBus() {
@@ -96,9 +96,12 @@ test('the say box target follows a retitle of the selected obelisk only', () => 
   assert.equal(node.textContent, 'to a');
 });
 
-test('the laptop camera starts outside the ring, its child rings, and the pylons, above the floor', () => {
+test('the laptop camera starts behind the viewer spot, above eye height, looking down the aisle', () => {
   const [x, y, z] = LAPTOP_START;
-  const outer = Math.max(RING_RADIUS + CHILD_RADIUS + 1.5, 5); // child ring edge plus the near-text band; pylons stand at 5 m
-  assert.ok(Math.hypot(x, z) > outer, `start ${Math.hypot(x, z).toFixed(2)} m from the center, need more than ${outer} m`);
-  assert.ok(y > 1.6, 'above eye height so the room reads from above');
+  const [tx, , tz] = LAPTOP_TARGET;
+  assert.equal(x, 0, 'on the aisle center line');
+  assert.ok(z > 0, 'behind the viewer spot, so no chat stands between the camera and the aisle');
+  assert.ok(y > 1.6, 'above eye height so the aisle reads from above');
+  assert.equal(tx, 0);
+  assert.ok(tz < -RING_RADIUS, 'looks past the first chats');
 });
