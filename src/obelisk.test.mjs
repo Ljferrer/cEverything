@@ -60,7 +60,7 @@ function shownHeight(slab) {
 }
 
 function assertNoOverlap(obelisk) {
-  const shown = obelisk.slabs.filter((s) => s.visible);
+  const shown = obelisk.slabs.filter((s) => s.visible).sort((a, b) => a.position.y - b.position.y); // bottom to top
   for (let i = 0; i + 1 < shown.length; i++) {
     const top = shown[i].position.y + shownHeight(shown[i]);
     assert.ok(top <= shown[i + 1].position.y + 1e-9, `slab ${shown[i].slabId} (top ${top.toFixed(3)}) draws over ${shown[i + 1].slabId} (bottom ${shown[i + 1].position.y.toFixed(3)})`);
@@ -82,7 +82,18 @@ test('a fresh stack lays out by measured height once the first syncs land', () =
   const o = roomWith(LONG);
   assert.deepEqual(o.slabs.map((s) => s.band), [null, null, null]);
   assertNoOverlap(o);
-  assert.ok(o.slabs[1].position.y >= measure(LONG[0]), 'the second slab clears the six-line first slab');
+  assert.ok(o.slabs[1].position.y >= measure(LONG[2]), 'the second slab clears the newest slab below it');
+});
+
+test('the stack grows bottom up: the newest slab sits on the base and pushes the older ones up', () => {
+  const o = roomWith(SHORT);
+  assert.equal(o.slabs.at(-1).position.y, 0, 'the newest slab sits at the bottom');
+  assert.ok(o.slabs[0].position.y > o.slabs[1].position.y && o.slabs[1].position.y > o.slabs[2].position.y, 'older slabs sit higher');
+  const before = o.slabs.map((s) => s.position.y);
+  o.addSlab({ id: 'new', role: 'user', text: 'the newest' });
+  flushSyncs();
+  assert.equal(o.slabs.at(-1).position.y, 0, 'the new slab takes the bottom');
+  o.slabs.slice(0, -1).forEach((s, i) => assert.ok(s.position.y > before[i], `slab ${s.slabId} moved up`));
 });
 
 test('far to near with changed text re-lays out when the full text lands', () => {
@@ -131,7 +142,7 @@ test('far to mid with unchanged summaries re-lays out at the measured heights wi
   assert.deepEqual(o.slabs.map((s) => s.text.text), summaries, 'the summaries did not change');
   assert.equal(Text.pending.length, 0, 'no sync was queued, so no callback can rescue the layout');
   assertNoOverlap(o);
-  assert.ok(o.slabs[1].position.y >= measure(summaries[0]), 'the second slab clears the first summary');
+  assert.ok(o.slabs[1].position.y >= measure(summaries[2]), 'the second slab clears the newest summary below it');
 });
 
 test('far to near for short slabs re-lays out at the measured heights without a new sync', () => {
@@ -143,12 +154,12 @@ test('far to near for short slabs re-lays out at the measured heights without a 
   assert.deepEqual(o.slabs.map((s) => s.text.text), SHORT, 'the full texts did not change');
   assert.equal(Text.pending.length, 0);
   assertNoOverlap(o);
-  assert.ok(o.slabs[2].position.y >= measure(SHORT[0]) + measure(SHORT[1]), 'the third slab clears the two-line second slab');
+  assert.ok(o.slabs[0].position.y >= measure(SHORT[2]) + measure(SHORT[1]), 'the oldest slab clears the two-line second slab');
 });
 
 test('the beacon rides above the stack top in every band', () => {
   const o = roomWith(LONG);
-  const topOf = () => o.slabs.at(-1).position.y + shownHeight(o.slabs.at(-1)) + STACK_BOTTOM;
+  const topOf = () => o.slabs[0].position.y + shownHeight(o.slabs[0]) + STACK_BOTTOM; // the oldest slab tops the stack
   o.update(cameraAt(3));
   flushSyncs();
   assert.ok(o.beacon.position.y > topOf());
@@ -226,7 +237,7 @@ test('the body reaches from the base to above the glyph and grows with a tall st
   const o = roomWith([...LONG, ...LONG, ...LONG]);
   const bottom = () => o.body.position.y - o.body.scale.y / 2;
   const top = () => o.body.position.y + o.body.scale.y / 2;
-  const stackTop = o.slabs.at(-1).position.y + measure(LONG.at(-1)) + STACK_BOTTOM;
+  const stackTop = o.slabs[0].position.y + measure(LONG[0]) + STACK_BOTTOM;
   assert.ok(Math.abs(bottom() - BASE_HEIGHT) < 1e-9, `body bottom ${bottom()} sits on the base`);
   assert.ok(top() > MIN_BODY_TOP, 'this stack is taller than the floor');
   assert.ok(o.title.position.y > stackTop && o.glyph.position.y > o.sound.position.y && o.sound.position.y > o.title.position.y, 'stack, title, SOUND ONLY, glyph, bottom to top');
@@ -285,7 +296,7 @@ test('cards leave a visible gap between their outlines and their text never over
   const o = mixedRoom();
   assertNoOverlap(o);
   for (let i = 0; i + 1 < o.slabs.length; i++) {
-    const [a, b] = [o.slabs[i], o.slabs[i + 1]];
+    const [b, a] = [o.slabs[i], o.slabs[i + 1]]; // the newer slab a sits under the older slab b
     const top = a.position.y + a.outline.position.y + a.outline.scale.y;
     const bottom = b.position.y + b.outline.position.y;
     assert.ok(a.text.position.y >= CARD_PAD && a.text.position.y + measure(a.text.text) <= a.outline.scale.y + 1e-9, `${a.slabId} text sits inside its outline`);
