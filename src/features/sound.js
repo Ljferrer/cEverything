@@ -13,7 +13,8 @@
 // Browsers block audio until a user gesture, so the AudioContext is created or
 // resumed on the first pointerdown, keydown or click (the VRButton click
 // included). Ambient cues (new sessions, waiting, tools) pass a token bucket,
-// so a replay burst plays at most a few sounds per second. The M key and a
+// up to a dozen sounds per second, so a replay of simultaneous wars plays as
+// a full cacophony without one burst clipping the speakers. The M key and a
 // small speaker button under the laptop mode label toggle mute.
 //
 // A sound file can override any cue: install fetches /sfx/<name>.ogg, else
@@ -28,8 +29,8 @@
 import { pylonFor } from '../pylon-map.js';
 
 const MASTER_GAIN = 0.22;
-const AMBIENT_RATE = 3; // tokens per second
-const AMBIENT_BURST = 3;
+const AMBIENT_RATE = 12; // tokens per second
+const AMBIENT_BURST = 12;
 const MUTE_KEY = 'obelisks.muted';
 
 /** Tool start pitch per pylon (Hz): C5, E5, G5, A4, one pentatonic chord so a run of tools stays consonant. */

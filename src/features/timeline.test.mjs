@@ -59,7 +59,8 @@ test('the log keeps every server frame in arrival order with its arrival time, a
   assert.deepEqual(tl.log.map((e) => e.type), ['session', 'slab', 'delta', 'state', 'tool']);
   assert.deepEqual(tl.log.map((e) => e.at), [100, 101, 102, 103, 104]);
   assert.equal(timeOf(tl.log[1]), 5000, 'a frame with ts shows its own time');
-  assert.equal(timeOf(tl.log[0]), 100, 'a frame without ts shows its arrival time');
+  assert.ok(timeOf(tl.log[0]) < 5000 && timeOf(tl.log[0]) > 4999, 'a session sits just before its first slab');
+  assert.equal(timeOf(tl.log[4]), 5000, 'a tool frame with no ts takes the time of the frame before it in its chat');
   assert.equal(tl.live, true);
   assert.equal(tl.index, 4);
   tl.stop();
@@ -228,11 +229,30 @@ test('playGap is the arrival gap to the next frame, capped at MAX_PLAY_GAP_MS', 
   assert.equal(playGap(log, 3), 0, 'no next frame waits 0 ms');
 });
 
-test('playGap paces backfilled history by ts: frames that arrived together keep their recorded gaps', () => {
-  const log = [{ at: 5, frame: { ts: 1000 } }, { at: 5, frame: { ts: 1400 } }, { at: 5, frame: {} }, { at: 90, frame: { ts: 1 } }];
-  assert.equal(playGap(log, 0), 400, 'both frames carry ts, so the ts gap wins over a 0 ms arrival gap');
-  assert.equal(playGap(log, 1), 0, 'one frame has no ts, so the arrival gap applies');
-  assert.equal(playGap(log, 2), 85);
+test('playGap paces backfilled history by when frames happened, not when they arrived', () => {
+  const log = [{ at: 5, frame: { ts: 1000 } }, { at: 5, frame: { ts: 1400 } }, { at: 5, key: 1400, frame: {} }, { at: 90, frame: { ts: 1 } }];
+  assert.equal(playGap(log, 0), 400, 'frames that arrived together keep their recorded gap');
+  assert.equal(playGap(log, 1), 0, 'a frame keyed to the frame before it plays at once');
+  assert.equal(playGap(log, 2), 0, 'time never runs backward');
+});
+
+test('history sent chat by chat replays interleaved by wall time, so simultaneous chats play together', () => {
+  const bus = fakeBus();
+  let clock = 1_000_000; // the backfill lands now, long after the history it carries
+  const tl = createTimeline(bus, { now: () => clock++ });
+  // The relay sends chat a's whole history, then chat b's: the two ran at the same time.
+  for (const f of [session('a'), slab('a', 'a1', 'a one', 100), slab('a', 'a2', 'a two', 300), slab('a', 'a3', 'a three', 500),
+    { t: 'state', sid: 'a', status: 'idle' },
+    session('b'), slab('b', 'b1', 'b one', 200), slab('b', 'b2', 'b two', 400)]) bus.emit(f.t, f);
+  assert.deepEqual(
+    tl.log.map((e) => (e.type === 'slab' ? e.frame.id : `${e.type}:${e.frame.sid}`)),
+    ['session:a', 'a1', 'session:b', 'b1', 'a2', 'b2', 'a3', 'state:a'],
+    'each session just before its first slab, every slab by its time, the state after its chat\'s last slab',
+  );
+  tl.scrubTo(0);
+  const seen = spy(bus);
+  for (let i = 0; i < 6; i++) tl.advance();
+  assert.deepEqual(seen.map((x) => x.detail.id ?? x.detail.sid), ['a1', 'b', 'b1', 'a2', 'b2', 'a3'], 'Play steps through both chats in turn');
 });
 
 test('toolStartFor reads a tool slab as a tool start, and nothing else', () => {
@@ -265,10 +285,8 @@ test('a Play step onto a backfilled tool slab emits its tool start after the sla
 
 test('play steps forward at the recorded pace until LIVE, and pause holds the frame', () => {
   const bus = fakeBus();
-  let clock = 0;
-  const gaps = [0, 200, 300, 100, 400];
-  const tl = createTimeline(bus, { now: () => (clock += gaps.shift()) });
-  for (const f of [session('a'), slab('a', 's1', 'one'), slab('a', 's2', 'two'), slab('a', 's3', 'three'), slab('a', 's4', 'four')]) bus.emit(f.t, f);
+  const tl = createTimeline(bus);
+  for (const [id, ts] of [['s0', 0], ['s1', 200], ['s2', 500], ['s3', 600], ['s4', 1000]]) bus.emit('slab', slab('a', id, id, ts));
   const timers = fakeTimers();
   let ticks = 0;
   const player = createPlayer(tl, { ...timers, onTick: () => ticks++ });
@@ -302,10 +320,8 @@ test('play steps forward at the recorded pace until LIVE, and pause holds the fr
 
 test('play waits playGap divided by the speed, and a speed change applies from the next wait', () => {
   const bus = fakeBus();
-  let clock = 0;
-  const gaps = [0, 400, 400, 400, 400];
-  const tl = createTimeline(bus, { now: () => (clock += gaps.shift()) });
-  for (const f of [session('a'), slab('a', 's1', 'one'), slab('a', 's2', 'two'), slab('a', 's3', 'three'), slab('a', 's4', 'four')]) bus.emit(f.t, f);
+  const tl = createTimeline(bus);
+  for (const [id, ts] of [['s0', 0], ['s1', 400], ['s2', 800], ['s3', 1200], ['s4', 1600]]) bus.emit('slab', slab('a', id, id, ts));
   const timers = fakeTimers();
   let rate = 4;
   const player = createPlayer(tl, { ...timers, speed: () => rate });
