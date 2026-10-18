@@ -60,7 +60,7 @@ test('a third root moves neither earlier root', async () => {
   session('c');
   assert.ok(pos('a').equals(a));
   assert.ok(pos('b').equals(b));
-  assert.deepEqual([pos('c').x, pos('c').z], [mod.GRID_COLUMNS[2], mod.FIRST_ROW_Z]);
+  assert.deepEqual([pos('c').x, pos('c').z], [-mod.AISLE_OFFSET, mod.FIRST_ROW_Z - mod.ROW_GAP]);
   assert.ok(pos('c').distanceTo(a) > 1 && pos('c').distanceTo(b) > 1);
 });
 
@@ -76,8 +76,8 @@ test('a new child moves no sibling, and each stands in a row behind its parent',
   assert.ok(pos('k1').equals(k1));
   assert.ok(pos('k2').equals(k2));
   for (const k of ['k1', 'k2', 'k3']) {
-    assert.ok(pos(k).z < pos('p').z - 1, `${k} behind its parent`);
-    assert.ok(Math.abs(pos(k).x - pos('p').x) <= 1.2 + 1e-9, `${k} within its parent's row width`);
+    assert.ok(Math.abs(pos(k).x) > Math.abs(pos('p').x) + 1, `${k} on the far side of its parent from the aisle`);
+    assert.ok(Math.abs(pos(k).z - pos('p').z) <= 1.2 + 1e-9, `${k} within its parent's row length`);
   }
   assert.equal(mod.getObelisk('k3').scale.x, mod.CHILD_SCALE);
 });
@@ -118,15 +118,18 @@ test('the room works with no localStorage at all', async () => {
   }
 });
 
-test('roots fill rows of three, 4 m apart, receding 5 m per row, and every slot stays clear of every pylon', async () => {
+test('roots alternate left and right of one aisle, 4 m per pair, and every chat stays clear of the aisle and the pylons', async () => {
   store.clear();
   const { mod, session, pos } = await room();
-  for (let i = 0; i < 9; i++) session(`r${i}`);
-  assert.deepEqual([pos('r0').x, pos('r0').z], [0, mod.FIRST_ROW_Z]);
-  assert.deepEqual([pos('r1').x, pos('r1').z], [-4, mod.FIRST_ROW_Z]);
-  assert.deepEqual([pos('r3').x, pos('r3').z], [0, mod.FIRST_ROW_Z - mod.ROW_GAP]);
-  for (let i = 0; i < 9; i++) {
-    for (let j = i + 1; j < 9; j++) assert.ok(pos(`r${i}`).distanceTo(pos(`r${j}`)) >= 4, `r${i} r${j}`);
-    for (const { x, z } of Object.values(PLACE)) assert.ok(Math.hypot(pos(`r${i}`).x - x, pos(`r${i}`).z - z) >= 3, `r${i} vs pylon`);
+  for (let i = 0; i < 8; i++) session(`r${i}`);
+  for (let k = 0; k < 4; k++) session(`r${k}-kid`, `r${k}`);
+  assert.deepEqual([pos('r0').x, pos('r0').z], [-mod.AISLE_OFFSET, mod.FIRST_ROW_Z]);
+  assert.deepEqual([pos('r1').x, pos('r1').z], [mod.AISLE_OFFSET, mod.FIRST_ROW_Z]);
+  assert.deepEqual([pos('r2').x, pos('r2').z], [-mod.AISLE_OFFSET, mod.FIRST_ROW_Z - mod.ROW_GAP]);
+  const all = [...Array(8).keys()].map((i) => `r${i}`).concat([0, 1, 2, 3].map((k) => `r${k}-kid`));
+  for (const sid of all) {
+    assert.ok(Math.abs(pos(sid).x) >= 2, `${sid} leaves the aisle (|x| < 2 m) clear`);
+    for (const { x, z } of Object.values(PLACE)) assert.ok(Math.hypot(pos(sid).x - x, pos(sid).z - z) >= 2.5, `${sid} vs pylon`);
   }
+  for (let i = 0; i < 8; i++) for (let j = i + 1; j < 8; j++) assert.ok(pos(`r${i}`).distanceTo(pos(`r${j}`)) >= 4, `r${i} r${j}`);
 });

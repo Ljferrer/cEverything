@@ -21,15 +21,16 @@ const GLOW_COLOR = new THREE.Color(0xffffff);
 const STARTS_KEPT = 256; // remembered `start` args; a lost `complete` never leaks past this
 
 /**
- * Wall placement (PIN-51, revised for the walkable grid): two pylons on each
- * side wall, outside the obelisk grid (columns at x = -4, 0, 4), so the room
- * floor stays clear to walk and every tool call flies across the room.
+ * Wall placement (PIN-51, revised for the aisle): two pylons on each side
+ * wall, well outside the chats and their child rows (which reach about 5 m
+ * from the aisle center line), so the aisle and the floor around each chat
+ * stay clear and every tool call flies across the room.
  */
 export const PLACE = Object.freeze({
-  browser: { x: -8, z: -3 },
-  filesystem: { x: 8, z: -3 },
-  shell: { x: -8, z: -9 },
-  other: { x: 8, z: -9 },
+  browser: { x: -8, z: -4 },
+  filesystem: { x: 8, z: -4 },
+  shell: { x: -8, z: -12 },
+  other: { x: 8, z: -12 },
 });
 
 const _from = new THREE.Vector3();

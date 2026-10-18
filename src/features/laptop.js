@@ -15,13 +15,13 @@ export const ERROR_MS = 4000;
 
 /**
  * Where the laptop camera starts: up and behind the viewer's spot, looking down
- * the obelisk grid, so the first view shows the rows instead of near-band text
+ * the aisle, so the first view shows the chats on both sides instead of near-band text
  * from the closest obelisk. A headset ignores this because its pose drives the
  * camera.
  */
-export const LAPTOP_START = Object.freeze([0, 6, 6]);
-/** Where the laptop camera looks: the middle of the first two rows of obelisks. */
-export const LAPTOP_TARGET = Object.freeze([0, 1, -6]);
+export const LAPTOP_START = Object.freeze([0, 5, 5]);
+/** Where the laptop camera looks: down the aisle, past the first few chats. */
+export const LAPTOP_TARGET = Object.freeze([0, 1, -7]);
 
 /** The say box target line shows the selected obelisk's title, else its sid, and follows a later retitle. */
 export function showTarget(bus, node, findObelisk) {
