@@ -1,9 +1,13 @@
 // sound.js pure parts under node, with no AudioContext and no DOM: the
 // event-to-cue mapping, the ambient rate limiter, the pitch per pylon, and the
-// net.send wrapper that must leave every sent frame unchanged.
+// net.send wrapper that must leave every sent frame unchanged, and the
+// override file names and loader (with a fake fetch and decode).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createMapper, createLimiter, isAmbient, pitchFor, PYLON_PITCH, wrapSend } from './sound.js';
+import {
+  createMapper, createLimiter, isAmbient, pitchFor, PYLON_PITCH, wrapSend,
+  fileFor, loadSfx, SFX_CUES, SFX_EXTS,
+} from './sound.js';
 
 test('select maps to select for a base and slab for a slab; miss maps to miss', () => {
   const map = createMapper();
@@ -125,4 +129,57 @@ test('wrapSend sends the same frame first, then reports it, and survives a throw
   }
   assert.equal(sent.length, 2);
   assert.equal(errors.length, 1);
+});
+
+test('every cue the mapper can produce has an override file name in SFX_CUES', () => {
+  const cues = ['select', 'slab', 'miss', 'spawn', 'waiting', 'fork', 'pipe', 'say', 'talkStart', 'talkSent', 'dropped', 'error'];
+  for (const p of Object.keys(PYLON_PITCH)) cues.push(`tool:${p}`, `done:${p}`);
+  for (const cue of cues) assert.ok(SFX_CUES.includes(fileFor(cue)), `${cue} -> ${fileFor(cue)}`);
+  assert.equal(fileFor('tool:shell'), 'tool-shell');
+  assert.equal(fileFor('done:browser'), 'tool-complete');
+  assert.equal(fileFor('talkStart'), 'voice-start');
+  assert.equal(fileFor('dropped'), 'voice-dropped');
+  assert.deepEqual([...SFX_EXTS], ['ogg', 'mp3']);
+});
+
+/** A fake fetch over a table of url -> {status, type, body}; anything else is a 404. */
+function fakeFetch(table, calls = []) {
+  return async (url) => {
+    calls.push(url);
+    const r = table[url] ?? { status: 404, type: 'text/plain', body: 'missing' };
+    return { ok: r.status === 200, headers: { get: () => r.type }, arrayBuffer: async () => r.body };
+  };
+}
+const decode = async (buf) => {
+  if (buf === 'corrupt') throw new Error('decode failed');
+  return { decoded: buf };
+};
+
+test('loadSfx prefers the ogg and never fetches the mp3 when the ogg decodes', async () => {
+  const calls = [];
+  const fetchImpl = fakeFetch({
+    '/sfx/select.ogg': { status: 200, type: 'audio/ogg', body: 'ogg' },
+    '/sfx/select.mp3': { status: 200, type: 'audio/mpeg', body: 'mp3' },
+  }, calls);
+  assert.deepEqual(await loadSfx('select', { fetchImpl, decode }), { decoded: 'ogg' });
+  assert.deepEqual(calls, ['/sfx/select.ogg']);
+});
+
+test('loadSfx falls back to the mp3 when the ogg is missing or fails to decode', async () => {
+  const mp3 = { status: 200, type: 'audio/mpeg', body: 'mp3' };
+  let fetchImpl = fakeFetch({ '/sfx/miss.mp3': mp3 });
+  assert.deepEqual(await loadSfx('miss', { fetchImpl, decode }), { decoded: 'mp3' });
+  fetchImpl = fakeFetch({ '/sfx/miss.ogg': { status: 200, type: 'audio/ogg', body: 'corrupt' }, '/sfx/miss.mp3': mp3 });
+  assert.deepEqual(await loadSfx('miss', { fetchImpl, decode }), { decoded: 'mp3' });
+});
+
+test('loadSfx returns null for the synth on 404s, the Vite HTML fallback, or a network error', async () => {
+  assert.equal(await loadSfx('fork', { fetchImpl: fakeFetch({}), decode }), null);
+  const html = { status: 200, type: 'text/html; charset=utf-8', body: '<!doctype html>' };
+  const fetchImpl = fakeFetch({ '/sfx/fork.ogg': html, '/sfx/fork.mp3': html });
+  assert.equal(await loadSfx('fork', { fetchImpl, decode }), null);
+  const throwing = async () => {
+    throw new TypeError('network');
+  };
+  assert.equal(await loadSfx('fork', { fetchImpl: throwing, decode }), null);
 });
