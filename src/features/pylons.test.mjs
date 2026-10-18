@@ -77,7 +77,7 @@ test('every pylon label faces the camera after a frame, even from behind a pylon
 
   const labels = [detail, ...['browser', 'filesystem', 'shell', 'other'].map((n) => {
     const group = scene.getObjectByName(`pylon:${n}`);
-    return group.children.find((c) => !c.isMesh && c !== detail);
+    return group.children.find((c) => !c.isMesh && !c.isLine && c !== detail);
   })];
   assert.equal(labels.length, 5);
   const facing = new THREE.Vector3();
@@ -139,7 +139,12 @@ test('a tool start brightens the textured face and it settles after the glow', (
   assert.ok(face.material.color.r > face.material.color.g, 'the flare leans red');
   assert.ok(scene.getObjectByName('pylon:browser:face').material.color.equals(idle), 'other pylons stay idle');
 
+  const edges = scene.getObjectByName('pylon:shell').children.find((c) => c.isLineSegments);
+  assert.ok(edges, 'the pylon is framed by edge lines, not a wireframe box');
+  assert.ok(edges.material.color.g > 0.5, 'the edges glow toward white');
+
   now += GLOW_MS;
   bus.emit('frame', { dt: 0.016 });
   assert.ok(face.material.color.equals(idle), 'the face returns to its idle tint');
+  assert.equal(edges.material.color.getHex(), 0xff2a1a, 'the edges settle back to SEELE red');
 });

@@ -366,3 +366,27 @@ test('slab text wraps long unbroken words inside the slab width', () => {
   assert.equal(text.maxWidth, SLAB_WIDTH);
   assert.equal(o.title.overflowWrap, 'break-word');
 });
+
+test('the base and far bars are solid, shared, and still take their picks', () => {
+  const a = mixedRoom();
+  const b = new Obelisk({ sid: 'solid-b', title: 'B', status: 'working' });
+  assert.equal(a.base.geometry, b.base.geometry, 'one base geometry for every obelisk');
+  assert.notEqual(a.base.material, b.base.material, 'each base keeps its own state color');
+  assert.equal(b.base.material.color.getHex(), stateColor('working'));
+  assert.ok(!a.base.material.wireframe && a.base.material.vertexColors);
+  for (const slab of a.slabs) {
+    assert.equal(slab.bar.material.wireframe, false);
+    assert.equal(slab.bar.material.color.getHex(), ROLE_COLORS[slab.role]);
+  }
+  assert.equal(a.slabs[0].bar.material, a.slabs[4].bar.material, 'same role, same bar material');
+  assert.equal(a.slabs[1].bar.geometry, a.slabs[2].bar.geometry, 'one bar geometry');
+  a.update(cameraAt(6));
+  a.updateMatrixWorld(true);
+  const bar = a.slabs[1];
+  const y = STACK_BOTTOM + bar.position.y + BAR_HEIGHT / 2;
+  const hit = new THREE.Raycaster(new THREE.Vector3(0.2, y, 6), new THREE.Vector3(0, 0, -1)).intersectObject(a, true)[0];
+  assert.equal(hit?.object, bar.bar, 'a ray through a far bar hits that bar');
+  assert.deepEqual(hit.object.userData, { sid: 'cards', slabId: bar.slabId });
+  const into = new THREE.Raycaster(new THREE.Vector3(0.1, BASE_HEIGHT / 2, 6), new THREE.Vector3(0, 0, -1)).intersectObject(a, true)[0];
+  assert.equal(into?.object, a.base, 'the base, not its edges, takes the pick');
+});
