@@ -110,11 +110,13 @@ export function install({ scene, bus, getObelisk = roomGetObelisk }) {
 
   function onTool(frame) {
     if (!frame || typeof frame !== 'object') return;
+    if (bus.scrubbed && !frame.replayed) return; // timeline.js holds the room scrubbed back
     const obelisk = getObelisk(frame.sid);
     if (!shouldFire(frame, Boolean(obelisk))) return;
     const pylon = pylonFor(frame.name);
     if (frame.phase === 'start') {
       remember(frame.id, frame.args);
+      if (frame.replayed) return; // a timeline rebuild fires no projectile and lights no pylon
       const now = Date.now();
       // A slab past plan 1's MAX_VISIBLE cap (src/obelisk.js) is hidden and
       // keeps a stale position (its #layoutStack sets `slab.visible`), so a
