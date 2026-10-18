@@ -16,6 +16,10 @@ export const STATE_COLORS = Object.freeze({
   error: 0xef5350, // red
 });
 
+// The SEELE-monolith look: a matte black body with red edges and red glyphs.
+export const MONOLITH_BLACK = 0x050505;
+export const MONOLITH_RED = 0xff2a1a;
+
 const FALLBACK = 0x9e9e9e;
 
 /** Color for a slab role: `user`, `assistant`, `thinking`, or `tool`. */
