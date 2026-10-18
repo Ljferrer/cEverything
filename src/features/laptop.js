@@ -46,6 +46,24 @@ export function showErrors(bus, node) {
 }
 
 /** The view link the QR code carries: `?share=<url>` when set, else the bare origin (never the edit key). */
+export const WALK_SPEED = 4; // meters per second for WASD / arrow keys (Shift doubles it)
+export const PUSH_DISTANCE = 1.2; // a wheel-in closer than this moves the orbit point forward instead of stalling
+export const PUSH_STEP = 0.6;
+
+/**
+ * Walk direction on the floor from held keys, relative to where the camera
+ * faces: forward/back (W/S, Up/Down), strafe (A/D, Left/Right), rise/sink (E/Q).
+ * Pure: returns {forward, right, up} in -1..1, so a test needs no DOM.
+ */
+export function walkAxes(keys) {
+  const has = (...k) => k.some((x) => keys.has(x));
+  return {
+    forward: (has('w', 'arrowup') ? 1 : 0) - (has('s', 'arrowdown') ? 1 : 0),
+    right: (has('d', 'arrowright') ? 1 : 0) - (has('a', 'arrowleft') ? 1 : 0),
+    up: (has('e') ? 1 : 0) - (has('q') ? 1 : 0),
+  };
+}
+
 export function viewLink(loc = location) {
   return new URLSearchParams(loc.search).get('share') ?? loc.origin;
 }
@@ -66,7 +84,62 @@ export async function install({ camera, renderer, bus, net }) {
   controls.target.set(...LAPTOP_TARGET);
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI * 0.49;
-  bus.addEventListener('frame', () => controls.update());
+  controls.zoomToCursor = true; // the wheel zooms toward what is under the mouse
+  controls.minDistance = 0.3;
+  controls.maxDistance = 80;
+  controls.screenSpacePanning = true;
+
+  // Wheel-in past the orbit point keeps going: OrbitControls' zoom shrinks the
+  // distance by a factor, so it stalls near the target. Close in, the wheel
+  // instead moves the camera and the orbit point forward together.
+  const fwd = new THREE.Vector3();
+  renderer.domElement.addEventListener(
+    'wheel',
+    (e) => {
+      if (e.deltaY >= 0 || camera.position.distanceTo(controls.target) > PUSH_DISTANCE) return;
+      camera.getWorldDirection(fwd);
+      fwd.multiplyScalar(PUSH_STEP * Math.min(3, -e.deltaY / 100));
+      camera.position.add(fwd);
+      controls.target.add(fwd);
+    },
+    { passive: true },
+  );
+
+  // Walk with WASD or the arrow keys (Q/E sink and rise, Shift runs): the
+  // camera and its orbit point move together, so you stroll down the aisle.
+  const held = new Set();
+  const typing = (e) => /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName ?? '') || e.target?.isContentEditable;
+  window.addEventListener('keydown', (e) => {
+    if (typing(e) || e.metaKey || e.ctrlKey) return;
+    const k = e.key.toLowerCase();
+    if (k === 'shift') return held.add('shift');
+    if (['w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(k)) {
+      held.add(k);
+      e.preventDefault();
+    }
+  });
+  window.addEventListener('keyup', (e) => held.delete(e.key.toLowerCase()));
+  window.addEventListener('blur', () => held.clear());
+  const flatFwd = new THREE.Vector3();
+  const rightV = new THREE.Vector3();
+  const move = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 1, 0);
+  bus.addEventListener('frame', (e) => {
+    const { forward, right, up: rise } = walkAxes(held);
+    if (forward || right || rise) {
+      const dt = Math.min(0.1, e.detail?.dt ?? 0.016);
+      const speed = WALK_SPEED * (held.has('shift') ? 2 : 1) * dt;
+      camera.getWorldDirection(flatFwd);
+      flatFwd.y = 0;
+      flatFwd.normalize();
+      rightV.crossVectors(flatFwd, up).normalize();
+      move.set(0, 0, 0).addScaledVector(flatFwd, forward * speed).addScaledVector(rightV, right * speed);
+      move.y += rise * speed;
+      camera.position.add(move);
+      controls.target.add(move);
+    }
+    controls.update();
+  });
 
   // Click or tap to select: a pointer that moved under 6 px between down and up.
   const raycaster = new THREE.Raycaster();

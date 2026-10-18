@@ -24,7 +24,7 @@ registerHooks({
   },
 });
 
-const { showErrors, showTarget, ERROR_MS, LAPTOP_START, LAPTOP_TARGET } = await import('./laptop.js');
+const { showErrors, showTarget, ERROR_MS, LAPTOP_START, LAPTOP_TARGET, walkAxes } = await import('./laptop.js');
 const { RING_RADIUS, CHILD_RADIUS } = await import('./room.js');
 
 function fakeBus() {
@@ -104,4 +104,11 @@ test('the laptop camera starts behind the viewer spot, above eye height, looking
   assert.ok(y > 1.6, 'above eye height so the aisle reads from above');
   assert.equal(tx, 0);
   assert.ok(tz < -RING_RADIUS, 'looks past the first chats');
+});
+
+test('walkAxes maps WASD, arrows and Q/E to forward, strafe and rise', () => {
+  assert.deepEqual(walkAxes(new Set()), { forward: 0, right: 0, up: 0 });
+  assert.deepEqual(walkAxes(new Set(['w', 'd'])), { forward: 1, right: 1, up: 0 });
+  assert.deepEqual(walkAxes(new Set(['arrowdown', 'arrowleft', 'q'])), { forward: -1, right: -1, up: -1 });
+  assert.deepEqual(walkAxes(new Set(['w', 's'])), { forward: 0, right: 0, up: 0 });
 });
