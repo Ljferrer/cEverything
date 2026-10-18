@@ -34,7 +34,7 @@ const BODY_GAP = 0.02; // the body's front face sits this far behind the slab te
 
 // Shared by every obelisk: the body is a unit box scaled to the stack height.
 const BODY_GEOMETRY = new THREE.BoxGeometry(1, 1, 1);
-const BODY_MATERIAL = new THREE.MeshBasicMaterial({ color: MONOLITH_BLACK });
+export const BODY_MATERIAL = new THREE.MeshBasicMaterial({ color: MONOLITH_BLACK });
 const EDGE_GEOMETRY = new THREE.EdgesGeometry(BODY_GEOMETRY);
 const EDGE_MATERIAL = new THREE.LineBasicMaterial({ color: MONOLITH_RED });
 const noPick = () => {};
