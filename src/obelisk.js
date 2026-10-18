@@ -95,6 +95,7 @@ function makeText(text, fontSize, color, onSync) {
   t.color = color;
   t.sdfGlyphSize = 64;
   t.maxWidth = SLAB_WIDTH;
+  t.overflowWrap = 'break-word'; // paths, URLs and ids have no spaces: break them inside the slab
   t.anchorX = 'center';
   t.anchorY = 'bottom';
   t.sync(onSync);
