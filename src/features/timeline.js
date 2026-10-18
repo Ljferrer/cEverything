@@ -7,7 +7,8 @@
 // `bus.scrubbed` is true: live frames keep recording, and room.js and
 // pylons.js ignore them. LIVE re-renders up to the newest frame and resumes.
 // Play moves forward from the scrubbed frame at the recorded pace (each gap
-// capped at MAX_PLAY_GAP_MS) and goes live at the newest frame; Pause holds.
+// capped at MAX_PLAY_GAP_MS, then divided by the speed slider's SPEEDS step)
+// and goes live at the newest frame; Pause holds.
 // The relay backfills history as slabs with no `tool` frames, so a Play step
 // onto a tool slab with no logged start emits one (`toolStartFor`): the
 // pylons fire and the tool sounds play for history too.
@@ -16,6 +17,10 @@ import { shouldInstallLaptop } from '../input.js';
 
 /** The longest wait between two frames during playback, so an idle stretch never stalls it. */
 export const MAX_PLAY_GAP_MS = 1000;
+
+/** Playback speeds the speed slider steps through; SPEEDS[DEFAULT_SPEED] is real time. */
+export const SPEEDS = Object.freeze([0.25, 0.5, 1, 2, 4, 8, 16]);
+export const DEFAULT_SPEED = 2;
 
 /** The server frames the timeline records and replays. */
 export const FRAME_TYPES = Object.freeze(['session', 'slab', 'delta', 'state', 'tool']);
@@ -113,14 +118,16 @@ export function playGap(log, k) {
 
 /**
  * Play and pause for a timeline. `play()` advances one frame per `playGap`
- * until the timeline goes live; it does nothing while live. `onTick` runs
- * after each step. The timer functions are injectable for tests.
+ * divided by `speed()`, until the timeline goes live; it does nothing while
+ * live. A speed change applies from the next wait. `onTick` runs after each
+ * step. The timer functions are injectable for tests.
  */
-export function createPlayer(timeline, { onTick = () => {}, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
+export function createPlayer(timeline, { onTick = () => {}, speed = () => 1, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
   let timer = null;
+  const wait = () => playGap(timeline.log, timeline.index) / speed();
   const tick = () => {
     timeline.advance();
-    timer = timeline.live ? null : setTimer(tick, playGap(timeline.log, timeline.index));
+    timer = timeline.live ? null : setTimer(tick, wait());
     onTick();
   };
   return {
@@ -129,7 +136,7 @@ export function createPlayer(timeline, { onTick = () => {}, setTimer = setTimeou
     },
     play() {
       if (timer !== null || timeline.live) return;
-      timer = setTimer(tick, playGap(timeline.log, timeline.index));
+      timer = setTimer(tick, wait());
     },
     pause() {
       if (timer !== null) clearTimer(timer);
@@ -159,16 +166,26 @@ export async function install({ bus }) {
       #timeline.live .live { color: #ff5544; border-color: #ff5544; }
       #timeline .play { padding: 2px 8px; letter-spacing: 0; }
       #timeline .play:disabled { opacity: .4; cursor: default; }
+      #timeline input.speed { flex: 0 0 64px; }
+      #timeline .rate { min-width: 34px; color: #999; font-variant-numeric: tabular-nums; }
     </style>
     <button type="button" class="play" aria-label="Play">▶</button>
-    <input type="range" min="0" max="0" value="0" step="1" aria-label="Timeline">
+    <input type="range" class="scrub" min="0" max="0" value="0" step="1" aria-label="Timeline">
     <span class="time"></span>
+    <input type="range" class="speed" min="0" max="${SPEEDS.length - 1}" value="${DEFAULT_SPEED}" step="1" aria-label="Playback speed">
+    <span class="rate"></span>
     <button type="button" class="live">LIVE</button>`;
   document.body.appendChild(ui);
-  const slider = ui.querySelector('input');
+  const slider = ui.querySelector('.scrub');
   const time = ui.querySelector('.time');
   const playButton = ui.querySelector('.play');
-  const player = createPlayer(timeline, { onTick: () => render() });
+  const speedSlider = ui.querySelector('.speed');
+  const rate = ui.querySelector('.rate');
+  const speed = () => SPEEDS[Number(speedSlider.value)] ?? 1;
+  const showRate = () => (rate.textContent = `${speed()}×`);
+  speedSlider.addEventListener('input', showRate);
+  showRate();
+  const player = createPlayer(timeline, { onTick: () => render(), speed });
 
   const render = () => {
     const n = timeline.log.length;
