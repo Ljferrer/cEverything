@@ -169,7 +169,7 @@ export function install({ scene, bus, getObelisk = roomGetObelisk, load = loadTe
       // keeps a stale position (its #layoutStack sets `slab.visible`), so a
       // hidden slab takes PIN-55's own base fallback, like a missing slab does.
       const slab = obelisk.slabs?.find((s) => s.slabId === frame.id);
-      const launch = slab && slab.visible ? slab : baseOf(obelisk);
+      const launch = slab && slab.visible && obelisk.detail !== false ? slab : baseOf(obelisk); // a distant obelisk shows no slabs
       launch.getWorldPosition(_from);
       pylons[pylon].face.getWorldPosition(_to); // the face center, not the endless column's
       pool.fire(_from, _to, now);
