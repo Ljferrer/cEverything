@@ -341,3 +341,19 @@ test('slab picking userData is unchanged and a ray through a card never hits its
   edge.params.Line.threshold = 0.05;
   assert.ok(edge.intersectObject(o, true).every((h) => h.object !== user.outline), 'a ray on the outline edge does not pick it');
 });
+
+test('the forward cone: a real camera facing an obelisk reads it in full, facing away collapses it', () => {
+  const o = new Obelisk({ sid: 'cone', title: 'T', status: 'idle' });
+  o.addSlab({ id: 'c1', role: 'assistant', text: 'x'.repeat(200) });
+  o.updateMatrixWorld(true);
+  const cam = new THREE.PerspectiveCamera();
+  cam.position.set(0, STACK_BOTTOM, 2);
+  cam.lookAt(0, STACK_BOTTOM, 0); // facing the obelisk, 2 m away
+  cam.updateMatrixWorld(true);
+  o.update(cam);
+  assert.equal(o.slabs[0].band, 'near');
+  cam.lookAt(0, STACK_BOTTOM, 10); // turned around, same spot
+  cam.updateMatrixWorld(true);
+  o.update(cam);
+  assert.equal(o.slabs[0].band, 'far');
+});
