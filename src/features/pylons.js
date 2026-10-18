@@ -37,15 +37,15 @@ const BODY_GEOMETRY = new THREE.BoxGeometry(PYLON_WIDTH * BODY_INSET, PYLON_RISE
 const STARTS_KEPT = 256; // remembered `start` args; a lost `complete` never leaks past this
 
 /**
- * Far placement (PIN-51, revised for the winding path): the four monoliths
- * stand in a shallow arc past the end of the path (24 chats reach about
- * z = -80), so they loom at its end and every tool call arcs a long way out.
+ * Far placement (PIN-51, revised for the four paths): one monolith stands far
+ * out along each path's heading (room.js PATHS), past its last chat, so every
+ * path ends at a tool and every tool call arcs a long way out.
  */
 export const PLACE = Object.freeze({
-  browser: { x: -28, z: -98 },
-  shell: { x: -10, z: -108 },
-  other: { x: 10, z: -108 },
-  filesystem: { x: 28, z: -98 },
+  shell: { x: 0, z: -70 },
+  filesystem: { x: 70, z: 0 },
+  other: { x: 0, z: 70 },
+  browser: { x: -70, z: 0 },
 });
 
 /** The face texture URL for a pylon name. */
@@ -110,7 +110,7 @@ function makePylon(name, load) {
   g.add(label);
   const p = PLACE[name];
   g.position.set(p.x, 0, p.z);
-  g.lookAt(0, 0, 0); // the broad face turns back up the path; install turns the labels to the camera each frame
+  g.lookAt(0, 0, 0); // the broad face turns back down its path to the center; install turns the labels to the camera each frame
   return { group: g, box, face, label, glowUntil: -Infinity };
 }
 

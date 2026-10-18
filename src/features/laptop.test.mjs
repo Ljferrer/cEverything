@@ -96,14 +96,12 @@ test('the say box target follows a retitle of the selected obelisk only', () => 
   assert.equal(node.textContent, 'to a');
 });
 
-test('the laptop camera starts behind the viewer spot, above eye height, looking down the aisle', () => {
+test('the laptop camera starts high on a diagonal between two paths, looking at the center', () => {
   const [x, y, z] = LAPTOP_START;
-  const [tx, , tz] = LAPTOP_TARGET;
-  assert.equal(x, 0, 'on the aisle center line');
-  assert.ok(z > 0, 'behind the viewer spot, so no chat stands between the camera and the aisle');
-  assert.ok(y > 1.6, 'above eye height so the aisle reads from above');
-  assert.equal(tx, 0);
-  assert.ok(tz < -RING_RADIUS, 'looks past the first chats');
+  assert.ok(x > 0 && z > 0 && Math.abs(x - z) < 1e-9, 'on the diagonal between the east and south paths, on no path');
+  assert.ok(y > 1.6 * 4, 'high enough to see over the chats to all four paths');
+  assert.deepEqual([...LAPTOP_TARGET], [0, 0, 0], 'looks at the center plaza');
+  assert.ok(Math.hypot(x, z) > RING_RADIUS, 'starts outside the first chats');
 });
 
 test('walkAxes: W/S walk, A/D turn, Q/E strafe, arrows walk and turn', () => {

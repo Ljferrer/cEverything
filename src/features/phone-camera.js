@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import { shouldInstallLaptop } from '../input.js';
 
 export const EYE_HEIGHT = 1.6;
-export const START = Object.freeze([0, EYE_HEIGHT, 3]); // the head of the aisle
+export const START = Object.freeze([0, EYE_HEIGHT, 3]); // the center plaza, where the four paths meet
 export const WALK_PER_PIXEL = 0.02; // meters walked per pixel of finger drag
 
 const zee = new THREE.Vector3(0, 0, 1);

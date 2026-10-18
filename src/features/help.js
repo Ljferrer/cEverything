@@ -10,7 +10,7 @@ export const STEPS = Object.freeze([
 ]);
 
 export const CONTROLS = Object.freeze([
-  'Follow the glowing path: each tall monolith beside it is one agent chat, its subagents stand behind it.',
+  'Four glowing paths lead out from the center: each tall monolith beside one is an agent chat, its subagents float beside it.',
   'Point and pull the trigger (or pinch) on a message: select that chat.',
   'Pinch a monolith base: fork that chat into a new one.',
   'Pinch a message, then another base: pipe that message into the other chat.',
