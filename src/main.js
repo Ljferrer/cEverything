@@ -20,7 +20,7 @@ document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x000000);
 
-const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 160); // far enough for the tool monoliths
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 200); // far enough for the tool monoliths
 camera.position.set(0, 1.6, 3);
 
 // Create all three controller slots up front: three.js r186 drops input sources
