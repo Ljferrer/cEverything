@@ -3,7 +3,7 @@
 //
 // server → client
 //   {t:'mode',    mode:'live'|'replay'|'synthetic', canEdit:boolean}
-//   {t:'session', sid, harness:'hermes'|'claude'|'synthetic', kind:'chat'|'agent', title, status, parent, phase}
+//   {t:'session', sid, harness:'hermes'|'claude'|'codex'|'synthetic', kind:'chat'|'agent', title, status, parent, phase}
 //   {t:'slab',    sid, id, role:'user'|'assistant'|'thinking'|'tool', text, ts}
 //   {t:'delta',   sid, id, role, text}
 //   {t:'tool',    sid, id, name, phase:'start'|'complete', args, summary, diff}
@@ -16,7 +16,7 @@
 //   {t:'voice', sid, mime, data_url}
 
 export const MODES = Object.freeze(['live', 'replay', 'synthetic']);
-export const HARNESSES = Object.freeze(['hermes', 'claude', 'synthetic']);
+export const HARNESSES = Object.freeze(['hermes', 'claude', 'codex', 'synthetic']);
 export const KINDS = Object.freeze(['chat', 'agent']);
 export const ROLES = Object.freeze(['user', 'assistant', 'thinking', 'tool']);
 export const TOOL_PHASES = Object.freeze(['start', 'complete']);

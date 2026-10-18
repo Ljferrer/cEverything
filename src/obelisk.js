@@ -1,7 +1,9 @@
 // One session = one obelisk (PIN-1): a stone base in its state color, a title label, and
 // a vertical stack of message slabs, newest at the bottom. The look is a homage to the
 // SEELE monoliths: a matte black body with red edges stands behind the stack,
-// and a red glyph ("Ψ 03") over a red "SOUND ONLY" line tops it. Each frame `update(camera)`
+// and a red glyph ("Ψ 03") over a red "SOUND ONLY" line tops it. A Codex session
+// (`session.harness === 'codex'`) gets its own look from LOOKS: teal stone,
+// teal edges, a terminal glyph (">_ 04"), and a "CODEX" line. Each frame `update(camera)`
 // picks a LOD band per slab (PIN-13) and shows full text, the mid summary, or a
 // role-colored bar. Slabs stack by measured height (src/stack.js): troika lays
 // text out asynchronously, so every `sync` re-runs the layout when it completes,
@@ -21,7 +23,7 @@
 import * as THREE from 'three';
 import { Text } from 'troika-three-text';
 import { lod, midSummary, coneScale } from './lod.js';
-import { colorFor, stateColor, MONOLITH_BLACK, MONOLITH_RED } from './colors.js';
+import { colorFor, stateColor, MONOLITH_BLACK, MONOLITH_RED, CODEX_STONE, CODEX_TEAL } from './colors.js';
 import { BAR_HEIGHT, slabHeight, stackLayout } from './stack.js';
 
 export const BASE_SIZE = 1.2;
@@ -53,6 +55,8 @@ const BODY_GEOMETRY = new THREE.BoxGeometry(1, 1, 1);
 export const BODY_MATERIAL = new THREE.MeshBasicMaterial({ color: MONOLITH_BLACK });
 const EDGE_GEOMETRY = new THREE.EdgesGeometry(BODY_GEOMETRY);
 const EDGE_MATERIAL = new THREE.LineBasicMaterial({ color: MONOLITH_RED });
+export const CODEX_BODY_MATERIAL = new THREE.MeshBasicMaterial({ color: CODEX_STONE });
+const CODEX_EDGE_MATERIAL = new THREE.LineBasicMaterial({ color: CODEX_TEAL });
 const noPick = () => {};
 
 // Shared by every card: a unit rectangle (x -0.5..0.5, y 0..1) scaled to the
@@ -93,14 +97,25 @@ const BASE_EDGES = new THREE.EdgesGeometry(BASE_GEOMETRY);
 const PANEL_MATERIAL = new THREE.MeshBasicMaterial({ color: PANEL_COLOR });
 
 const SYMBOLS = ['Δ', 'Θ', 'Λ', 'Ξ', 'Π', 'Σ', 'Φ', 'Ψ', 'Ω', 'Γ'];
+const CODEX_SYMBOLS = ['>_', '$_', '{ }', '[ ]', '</>', '::', '#!', '~/'];
 const numbers = new Map(); // sid -> creation-order number, so a rebuilt obelisk keeps its glyph
 
-/** The red glyph for a sid: a symbol from a hash of the sid, then its two-digit creation number. */
-export function glyphFor(sid) {
+/** The look per harness: SEELE for Claude Code, Hermes, and synthetic; teal stone for Codex. */
+export const LOOKS = Object.freeze({
+  seele: Object.freeze({ body: BODY_MATERIAL, edges: EDGE_MATERIAL, accent: MONOLITH_RED, symbols: SYMBOLS, motto: 'SOUND ONLY' }),
+  codex: Object.freeze({ body: CODEX_BODY_MATERIAL, edges: CODEX_EDGE_MATERIAL, accent: CODEX_TEAL, symbols: CODEX_SYMBOLS, motto: 'CODEX' }),
+});
+
+export function lookFor(harness) {
+  return harness === 'codex' ? LOOKS.codex : LOOKS.seele;
+}
+
+/** The glyph for a sid: a symbol from a hash of the sid, then its two-digit creation number. */
+export function glyphFor(sid, symbols = SYMBOLS) {
   if (!numbers.has(sid)) numbers.set(sid, numbers.size + 1);
   let h = 0x811c9dc5; // FNV-1a
   for (let i = 0; i < sid.length; i++) h = Math.imul(h ^ sid.charCodeAt(i), 0x01000193);
-  return `${SYMBOLS[(h >>> 0) % SYMBOLS.length]} ${String(numbers.get(sid)).padStart(2, '0')}`;
+  return `${symbols[(h >>> 0) % symbols.length]} ${String(numbers.get(sid)).padStart(2, '0')}`;
 }
 
 /** A text's measured height once troika has laid it out, else `fallback`. */
@@ -144,11 +159,12 @@ export class Obelisk extends THREE.Group {
     /** @type {Array<THREE.Group & {slabId:string, role:string, full:string, band:string|null, text:Text, bar:THREE.Mesh}>} */
     this.slabs = [];
     this.toolCount = 0;
+    this.look = lookFor(session.harness);
 
     this.base = new THREE.Mesh(BASE_GEOMETRY, new THREE.MeshBasicMaterial({ vertexColors: true, color: stateColor(session.status) }));
     this.base.position.y = BASE_HEIGHT / 2;
     this.base.userData = { sid: session.sid, kind: 'base' };
-    const baseEdges = new THREE.LineSegments(BASE_EDGES, EDGE_MATERIAL);
+    const baseEdges = new THREE.LineSegments(BASE_EDGES, this.look.edges);
     baseEdges.raycast = noPick;
     this.base.add(baseEdges);
     this.add(this.base);
@@ -159,17 +175,17 @@ export class Obelisk extends THREE.Group {
     this.title.userData = { sid: session.sid, kind: 'base' }; // a title hit selects the obelisk, like its base
     this.add(this.title);
 
-    this.body = new THREE.Mesh(BODY_GEOMETRY, BODY_MATERIAL);
+    this.body = new THREE.Mesh(BODY_GEOMETRY, this.look.body);
     this.body.raycast = noPick;
-    const edges = new THREE.LineSegments(EDGE_GEOMETRY, EDGE_MATERIAL);
+    const edges = new THREE.LineSegments(EDGE_GEOMETRY, this.look.edges);
     edges.raycast = noPick;
     this.body.add(edges);
     this.add(this.body);
 
-    this.glyph = makeText(glyphFor(session.sid), GLYPH_SIZE, MONOLITH_RED, () => this.#layoutStack());
+    this.glyph = makeText(glyphFor(session.sid, this.look.symbols), GLYPH_SIZE, this.look.accent, () => this.#layoutStack());
     this.glyph.raycast = noPick;
     this.add(this.glyph);
-    this.sound = makeText('SOUND ONLY', SOUND_SIZE, MONOLITH_RED, () => this.#layoutStack());
+    this.sound = makeText(this.look.motto, SOUND_SIZE, this.look.accent, () => this.#layoutStack());
     this.sound.letterSpacing = 0.15;
     this.sound.raycast = noPick;
     this.add(this.sound);
