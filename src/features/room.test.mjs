@@ -60,11 +60,12 @@ test('a third root moves neither earlier root', async () => {
   session('c');
   assert.ok(pos('a').equals(a));
   assert.ok(pos('b').equals(b));
-  assert.deepEqual([pos('c').x, pos('c').z], [-mod.AISLE_OFFSET, mod.FIRST_ROW_Z - mod.ROW_GAP]);
+  const third = mod.rootSlotPoint(2);
+  assert.deepEqual([pos('c').x, pos('c').z], [third.x, third.z]);
   assert.ok(pos('c').distanceTo(a) > 1 && pos('c').distanceTo(b) > 1);
 });
 
-test('a new child moves no sibling, and each stands in a row behind its parent', async () => {
+test('a new cherub moves no sibling, and cherubs float small on both sides of their parent', async () => {
   store.clear();
   const { mod, session, pos } = await room();
   session('p');
@@ -75,11 +76,38 @@ test('a new child moves no sibling, and each stands in a row behind its parent',
   session('k3', 'p', 'build');
   assert.ok(pos('k1').equals(k1));
   assert.ok(pos('k2').equals(k2));
+  const { ox, oz } = mod.rootSlotPoint(0);
+  const across = (k) => (pos(k).x - pos('p').x) * -oz + (pos(k).z - pos('p').z) * ox;
+  assert.ok(across('k1') > 1 && across('k2') < -1, 'the first two take opposite wings');
+  const behind = (k) => (pos(k).x - pos('p').x) * ox + (pos(k).z - pos('p').z) * oz;
+  for (const k of ['k1', 'k2', 'k3']) assert.ok(behind(k) >= mod.WING_BACK - 1e-9, `${k} floats behind its parent, away from the path`);
   for (const k of ['k1', 'k2', 'k3']) {
-    assert.ok(Math.abs(pos(k).x) > Math.abs(pos('p').x) + 1, `${k} on the far side of its parent from the aisle`);
-    assert.ok(Math.abs(pos(k).z - pos('p').z) <= 1.5 + 1e-9, `${k} within its parent's row length`);
+    assert.ok(pos(k).y >= mod.WING_BASE * 0.9, `${k} floats above the floor (y ${pos(k).y})`);
+    assert.equal(mod.getObelisk(k).scale.x, mod.CHILD_SCALE);
   }
-  assert.equal(mod.getObelisk('k3').scale.x, mod.CHILD_SCALE);
+});
+
+test('a WAR swarm of 160 cherubs builds two wings that never collide or reach a neighbor chat', async () => {
+  store.clear();
+  const { mod, session, pos } = await room();
+  for (let i = 0; i < 6; i++) session(`r${i}`);
+  const N = 160;
+  for (let k = 0; k < N; k++) session(`w${k}`, 'r2');
+  const cherubs = [...Array(N).keys()].map((k) => pos(`w${k}`));
+  for (let i = 0; i < N; i++) {
+    for (let j = i + 1; j < N; j++) assert.ok(cherubs[i].distanceTo(cherubs[j]) >= 0.5, `w${i} w${j} ${cherubs[i].distanceTo(cherubs[j]).toFixed(2)}`);
+  }
+  const flat = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+  for (const c of cherubs) {
+    assert.ok(flat(c, pos('r2')) >= 1, 'no cherub stands inside its parent');
+    for (const r of ['r0', 'r1', 'r3', 'r4', 'r5']) assert.ok(flat(c, pos(r)) >= 1.2, `a cherub reaches ${r}`);
+  }
+  // A neighbor on the same side carries its own swarm: the two wings must not meet.
+  for (let k = 0; k < N; k++) session(`v${k}`, 'r4');
+  for (let k = 0; k < N; k++) {
+    for (let j = 0; j < N; j++) assert.ok(pos(`w${k}`).distanceTo(pos(`v${j}`)) >= 0.5, `w${k} meets v${j}`);
+  }
+  assert.ok(Math.max(...cherubs.map((c) => c.y)) > 10, 'a big swarm towers over the path');
 });
 
 test('a reload with a stored slot map restores every position', async () => {
@@ -118,18 +146,31 @@ test('the room works with no localStorage at all', async () => {
   }
 });
 
-test('roots alternate left and right of one aisle, 4 m per pair, and every chat stays clear of the aisle and the pylons', async () => {
+test('roots alternate sides of a winding path, and every chat stays clear of the path, the others, and the pylons', async () => {
   store.clear();
   const { mod, session, pos } = await room();
-  for (let i = 0; i < 8; i++) session(`r${i}`);
-  for (let k = 0; k < 4; k++) session(`r${k}-kid`, `r${k}`);
-  assert.deepEqual([pos('r0').x, pos('r0').z], [-mod.AISLE_OFFSET, mod.FIRST_ROW_Z]);
-  assert.deepEqual([pos('r1').x, pos('r1').z], [mod.AISLE_OFFSET, mod.FIRST_ROW_Z]);
-  assert.deepEqual([pos('r2').x, pos('r2').z], [-mod.AISLE_OFFSET, mod.FIRST_ROW_Z - mod.ROW_GAP]);
-  const all = [...Array(8).keys()].map((i) => `r${i}`).concat([0, 1, 2, 3].map((k) => `r${k}-kid`));
-  for (const sid of all) {
-    assert.ok(Math.abs(pos(sid).x) >= 2, `${sid} leaves the aisle (|x| < 2 m) clear`);
-    for (const { x, z } of Object.values(PLACE)) assert.ok(Math.hypot(pos(sid).x - x, pos(sid).z - z) >= 2.5, `${sid} vs pylon`);
+  const N = 24;
+  for (let i = 0; i < N; i++) session(`r${i}`);
+  for (let k = 0; k < 6; k++) session(`r${k}-kid`, `r${k}`);
+  const xs = [];
+  for (let i = 0; i < N; i++) {
+    const slot = mod.rootSlotPoint(i);
+    const p = mod.pathPoint(slot.s);
+    const side = (pos(`r${i}`).x - p.x) * p.lx + (pos(`r${i}`).z - p.z) * p.lz;
+    assert.ok(Math.abs(Math.abs(side) - mod.PATH_SIDE) < 1e-9, `r${i} stands PATH_SIDE from the path`);
+    assert.equal(Math.sign(side), i % 2 === 0 ? 1 : -1, `r${i} on the ${i % 2 === 0 ? 'left' : 'right'}`);
+    xs.push(p.x);
   }
-  for (let i = 0; i < 8; i++) for (let j = i + 1; j < 8; j++) assert.ok(pos(`r${i}`).distanceTo(pos(`r${j}`)) >= 4, `r${i} r${j}`);
+  assert.ok(Math.max(...xs) - Math.min(...xs) > 2 * mod.PATH_SWING * 0.9, 'the path swings side to side, not a straight hallway');
+  // Distance to the path: sample it finely.
+  const pathPts = Array.from({ length: 2000 }, (_, i) => mod.pathPoint(i * 0.05));
+  const fromPath = (q) => Math.min(...pathPts.map((p) => Math.hypot(q.x - p.x, q.z - p.z)));
+  const all = [...Array(N).keys()].map((i) => `r${i}`).concat([...Array(6).keys()].map((k) => `r${k}-kid`));
+  for (const sid of all) {
+    assert.ok(fromPath(pos(sid)) >= 2, `${sid} leaves the path clear (${fromPath(pos(sid)).toFixed(2)} m)`);
+    for (const { x, z } of Object.values(PLACE)) assert.ok(Math.hypot(pos(sid).x - x, pos(sid).z - z) >= 10, `${sid} vs pylon`);
+  }
+  for (let i = 0; i < N; i++) for (let j = i + 1; j < N; j++) assert.ok(pos(`r${i}`).distanceTo(pos(`r${j}`)) >= 3.5, `r${i} r${j} ${pos(`r${i}`).distanceTo(pos(`r${j}`)).toFixed(2)}`);
+  const ribbon = mod.pathRibbonLength();
+  assert.ok(ribbon > mod.rootSlotPoint(N - 1).s, 'the lit path reaches past the farthest chat');
 });

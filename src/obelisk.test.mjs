@@ -437,3 +437,16 @@ test('the obelisk picks its look from session.harness: Codex is teal stone, ever
   THREE.Mesh.prototype.raycast.call(codex.o.body, ray, hits); // the same ray does cross the body
   assert.ok(hits.length > 0);
 });
+
+test('a subagent cherub keeps only its last CHERUB_KEPT slabs; a main chat keeps far more', async () => {
+  const { CHERUB_KEPT, MAX_KEPT } = await import('./obelisk.js');
+  const cherub = new Obelisk({ sid: 'cherub', title: 'c', status: 'idle', parent: 'main' });
+  const main = new Obelisk({ sid: 'main', title: 'm', status: 'idle', parent: null });
+  for (let i = 0; i < 12; i++) {
+    cherub.addSlab({ id: `c${i}`, role: 'assistant', text: `line ${i}` });
+    main.addSlab({ id: `m${i}`, role: 'assistant', text: `line ${i}` });
+  }
+  assert.deepEqual(cherub.slabs.map((s) => s.slabId), ['c8', 'c9', 'c10', 'c11'].slice(-CHERUB_KEPT), 'the cherub keeps its newest slabs');
+  assert.equal(main.slabs.length, 12);
+  assert.ok(MAX_KEPT > CHERUB_KEPT);
+});

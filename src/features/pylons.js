@@ -1,7 +1,9 @@
-// Pylons and projectiles (plan 4, PIN-2): four pylons at the compass
-// points, radius 5 m (PIN-51); a `tool` start fires a pooled sphere from the
-// calling slab (or the obelisk base) to the tool's pylon and lights the pylon
-// for 2 s (PIN-52, PIN-53, PIN-55); a filesystem `complete` writes the file's
+// Pylons and projectiles (plan 4, PIN-2): four tool monoliths stand far out
+// past the end of the hall and rise past the camera's far plane, so no top ever
+// shows; a `tool` start
+// fires a pooled sphere from the
+// calling slab (or the obelisk base) to the tool's pylon, leaves a tracer line
+// along its arc, and lights the pylon for 2 s (PIN-52, PIN-53, PIN-55); a filesystem `complete` writes the file's
 // basename and `+n/-m` on the filesystem pylon (PIN-54); every label turns to
 // the camera each frame. Frames for a sid with no obelisk and for spawning
 // tools are dropped (PIN-50). This is the only plan 4 file
@@ -15,32 +17,35 @@ import * as THREE from 'three';
 import { Text } from 'troika-three-text';
 import { getObelisk as roomGetObelisk } from './room.js';
 import { PYLONS, pylonFor, shouldFire, diffCounts } from '../pylon-map.js';
-import { createPool } from '../projectile.js';
-import { MONOLITH_RED } from '../colors.js';
+import { createPool, createTracers } from '../projectile.js';
+import { MONOLITH_RED, MONOLITH_BLACK } from '../colors.js';
 
 export const PYLON_RADIUS = 5; // legacy; placement now comes from PLACE
-export const PYLON_HEIGHT = 3;
-export const PYLON_WIDTH = 0.6;
+export const PYLON_HEIGHT = 15; // the textured face at the foot, where labels sit and tool calls land
+export const PYLON_RISE = 2000; // the column: far past the camera's far plane, so it never ends in view
+export const PYLON_WIDTH = 3.2;
+export const PYLON_DEPTH = 0.7; // a flat monolith, broad face toward the path
 export const GLOW_MS = 2000;
 const BASE_COLOR = new THREE.Color(MONOLITH_RED); // the SEELE red edges
 const GLOW_COLOR = new THREE.Color(0xffffff);
 const FACE_IDLE = new THREE.Color(0.75, 0.75, 0.75); // the face texture, a little dimmed
 const FACE_GLOW = new THREE.Color(2.6, 1.8, 1.8); // over 1, so the dark stone and red emblem flare
 const FACE_INSET = 0.98; // inside the edge frame, so its edges never z-fight the face
-const BOX_EDGES = new THREE.EdgesGeometry(new THREE.BoxGeometry(PYLON_WIDTH, PYLON_HEIGHT, PYLON_WIDTH));
+const BOX_EDGES = new THREE.EdgesGeometry(new THREE.BoxGeometry(PYLON_WIDTH, PYLON_RISE, PYLON_DEPTH));
+const BODY_INSET = 0.96; // the black column sits inside the face and the edge frame
+const BODY_GEOMETRY = new THREE.BoxGeometry(PYLON_WIDTH * BODY_INSET, PYLON_RISE, PYLON_DEPTH * BODY_INSET);
 const STARTS_KEPT = 256; // remembered `start` args; a lost `complete` never leaks past this
 
 /**
- * Wall placement (PIN-51, revised for the aisle): two pylons on each side
- * wall, well outside the chats and their child rows (which reach about 5 m
- * from the aisle center line), so the aisle and the floor around each chat
- * stay clear and every tool call flies across the room.
+ * Far placement (PIN-51, revised for the winding path): the four monoliths
+ * stand in a shallow arc past the end of the path (24 chats reach about
+ * z = -80), so they loom at its end and every tool call arcs a long way out.
  */
 export const PLACE = Object.freeze({
-  browser: { x: -8, z: -4 },
-  filesystem: { x: 8, z: -4 },
-  shell: { x: -8, z: -12 },
-  other: { x: 8, z: -12 },
+  browser: { x: -28, z: -98 },
+  shell: { x: -10, z: -108 },
+  other: { x: 10, z: -108 },
+  filesystem: { x: 28, z: -98 },
 });
 
 /** The face texture URL for a pylon name. */
@@ -65,10 +70,10 @@ function makeLabel(text, fontSize, y, anchorY) {
   t.fontSize = fontSize;
   t.color = 0xffffff;
   t.sdfGlyphSize = 64;
-  t.maxWidth = 2.4;
+  t.maxWidth = PYLON_WIDTH * 4;
   t.anchorX = 'center';
   t.anchorY = anchorY;
-  t.position.set(0, y, PYLON_WIDTH / 2 + 0.02); // just in front of the face toward the room
+  t.position.set(0, y, PYLON_DEPTH / 2 + 0.05); // just in front of the face toward the room
   t.sync();
   return t;
 }
@@ -78,11 +83,16 @@ function makePylon(name, load) {
   g.name = `pylon:${name}`;
   const box = new THREE.LineSegments(BOX_EDGES, new THREE.LineBasicMaterial({ color: BASE_COLOR.getHex() }));
   box.raycast = () => {}; // nothing picks a pylon
-  box.position.y = PYLON_HEIGHT / 2;
+  box.position.y = PYLON_RISE / 2;
   box.userData = { kind: 'pylon', pylon: name };
   g.add(box);
+  const body = new THREE.Mesh(BODY_GEOMETRY, new THREE.MeshBasicMaterial({ color: MONOLITH_BLACK }));
+  body.name = `pylon:${name}:body`;
+  body.raycast = () => {};
+  body.position.y = PYLON_RISE / 2;
+  g.add(body);
   const face = new THREE.Mesh(
-    new THREE.BoxGeometry(PYLON_WIDTH * FACE_INSET, PYLON_HEIGHT * FACE_INSET, PYLON_WIDTH * FACE_INSET),
+    new THREE.BoxGeometry(PYLON_WIDTH * FACE_INSET, PYLON_HEIGHT * FACE_INSET, PYLON_DEPTH * FACE_INSET),
     new THREE.MeshBasicMaterial({ color: FACE_IDLE }),
   );
   face.name = `pylon:${name}:face`;
@@ -96,11 +106,11 @@ function makePylon(name, load) {
     face.material.needsUpdate = true;
     face.visible = true;
   });
-  const label = makeLabel(name, 0.24, PYLON_HEIGHT + 0.1, 'bottom');
+  const label = makeLabel(name, 1.2, PYLON_HEIGHT + 0.4, 'bottom');
   g.add(label);
   const p = PLACE[name];
   g.position.set(p.x, 0, p.z);
-  g.lookAt(0, 0, 0); // the labels sit on the face toward the room center; install turns them to the camera each frame
+  g.lookAt(0, 0, 0); // the broad face turns back up the path; install turns the labels to the camera each frame
   return { group: g, box, face, label, glowUntil: -Infinity };
 }
 
@@ -127,13 +137,14 @@ export function install({ scene, bus, getObelisk = roomGetObelisk, load = loadTe
     group.add(pylons[name].group);
   }
   // Second label on the filesystem pylon: the last completed file's basename and +n/-m (PIN-54).
-  const detail = makeLabel('', 0.14, PYLON_HEIGHT / 2, 'middle');
+  const detail = makeLabel('', 0.7, PYLON_HEIGHT / 2, 'middle');
   detail.name = 'pylon:filesystem:detail';
   pylons.filesystem.group.add(detail);
   // Every label turns to the camera each frame, so none reads mirrored from behind.
   const labels = [detail, ...PYLONS.map((name) => pylons[name].label)];
 
   const pool = createPool({ THREE, parent: group });
+  const tracers = createTracers({ THREE, parent: group });
   /** @type {Map<string, object>} `start` args by tool call id, until its `complete`. */
   const starts = new Map();
 
@@ -160,8 +171,9 @@ export function install({ scene, bus, getObelisk = roomGetObelisk, load = loadTe
       const slab = obelisk.slabs?.find((s) => s.slabId === frame.id);
       const launch = slab && slab.visible ? slab : baseOf(obelisk);
       launch.getWorldPosition(_from);
-      pylons[pylon].box.getWorldPosition(_to);
+      pylons[pylon].face.getWorldPosition(_to); // the face center, not the endless column's
       pool.fire(_from, _to, now);
+      tracers.trace(_from, _to, now);
       pylons[pylon].glowUntil = now + GLOW_MS; // a repeat restarts the timer
     } else if (frame.phase === 'complete') {
       if (pylon === 'filesystem') {
@@ -184,6 +196,7 @@ export function install({ scene, bus, getObelisk = roomGetObelisk, load = loadTe
 
   function tick(now) {
     pool.update(now);
+    tracers.update(now);
     for (const name of PYLONS) {
       const p = pylons[name];
       const k = Math.max(0, Math.min(1, (p.glowUntil - now) / GLOW_MS));

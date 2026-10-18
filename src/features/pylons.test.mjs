@@ -148,3 +148,22 @@ test('a tool start brightens the textured face and it settles after the glow', (
   assert.ok(face.material.color.equals(idle), 'the face returns to its idle tint');
   assert.equal(edges.material.color.getHex(), 0xff2a1a, 'the edges settle back to SEELE red');
 });
+
+test('each tool monolith rises with no top in view, and a tool call still lands on its face', async () => {
+  const { PYLON_HEIGHT, PYLON_RISE, PLACE } = await import('./pylons.js');
+  const { scene, bus } = setup();
+  const shell = scene.getObjectByName('pylon:shell');
+  shell.updateMatrixWorld(true);
+  const top = new THREE.Box3().setFromObject(scene.getObjectByName('pylon:shell:body')).max.y;
+  const farthest = Math.hypot(PLACE.shell.x, PLACE.shell.z, top) ; // camera near the origin to the column top
+  assert.ok(top >= 1000, `the column rises ${top} m`);
+  assert.ok(farthest > 500, 'its top sits far past any camera far plane the room uses');
+  bus.emit('tool', { t: 'tool', sid: 's1', id: 'b2', name: 'Bash', phase: 'start', args: { command: 'ls' } });
+  let end = null;
+  scene.getObjectByName('pylons').traverse((o) => {
+    if (o.isLine && !o.isLineSegments && o.visible) end = new THREE.Vector3().fromBufferAttribute(o.geometry.getAttribute('position'), o.geometry.getAttribute('position').count - 1);
+  });
+  assert.ok(end, 'the call left a tracer');
+  assert.ok(Math.abs(end.y - PYLON_HEIGHT / 2) < 1e-6, `the tracer ends at the face center (y ${end.y}), not up the column`);
+  assert.ok(PYLON_RISE > PYLON_HEIGHT);
+});

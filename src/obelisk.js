@@ -26,14 +26,15 @@ import { lod, midSummary, coneScale } from './lod.js';
 import { colorFor, stateColor, MONOLITH_BLACK, MONOLITH_RED, CODEX_STONE, CODEX_TEAL } from './colors.js';
 import { BAR_HEIGHT, slabHeight, stackLayout } from './stack.js';
 
-export const BASE_SIZE = 0.8;
+export const BASE_SIZE = 1.2;
 export const BASE_HEIGHT = 0.1;
-export const SLAB_WIDTH = 1.0;
+export const SLAB_WIDTH = 1.5;
 export const STACK_BOTTOM = BASE_HEIGHT + 0.16; // room above the base for the title
 export const MAX_VISIBLE = 40;
 export const TITLE_SIZE = 0.09;
 export const MAX_KEPT = 200; // older slabs are disposed; the relay caches the same count
-export const BODY_WIDTH = 1.15;
+export const CHERUB_KEPT = 4; // a subagent keeps only its last few slabs, so a swarm of hundreds stays light
+export const BODY_WIDTH = 1.65;
 export const BODY_DEPTH = 0.06;
 export const GLYPH_SIZE = 0.2;
 export const SOUND_SIZE = 0.045;
@@ -146,6 +147,7 @@ export class Obelisk extends THREE.Group {
     this.session = { ...session };
     this.status = session.status;
     this.userData = { sid: session.sid, kind: 'obelisk' };
+    this.maxKept = session.parent ? CHERUB_KEPT : MAX_KEPT;
     /** @type {Array<THREE.Group & {slabId:string, role:string, full:string, band:string|null, text:Text, bar:THREE.Mesh}>} */
     this.slabs = [];
     this.toolCount = 0;
@@ -351,7 +353,7 @@ export class Obelisk extends THREE.Group {
   // glyph, at least to MIN_BODY_TOP with the glyph at its top, and the beacon
   // rides above the body.
   #layoutStack() {
-    while (this.slabs.length > MAX_KEPT) this.#drop(this.slabs.shift());
+    while (this.slabs.length > this.maxKept) this.#drop(this.slabs.shift());
     const firstVisible = Math.max(0, this.slabs.length - MAX_VISIBLE);
     const shown = this.slabs.slice(firstVisible);
     const heights = shown.map(

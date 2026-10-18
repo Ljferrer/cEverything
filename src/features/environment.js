@@ -9,7 +9,7 @@ import { BODY_MATERIAL } from '../obelisk.js';
 export const SKYBOX_URL = '/assets/skybox.jpg';
 export const FLOOR_URL = '/assets/floor.jpg';
 export const MONOLITH_URL = '/assets/monolith.jpg';
-export const FLOOR_SIZE = 60; // meters on a side, past the aisle and the pylons
+export const FLOOR_SIZE = 240; // meters on a side, past a full path and the far tool monoliths
 export const FLOOR_TILE = 4; // meters per texture repeat
 
 export function install({ scene, renderer }) {
