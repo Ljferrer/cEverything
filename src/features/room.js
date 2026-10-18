@@ -8,8 +8,8 @@
 // pinwheel or any rotational symbol. Chats fill the paths in
 // turn and alternate sides along each, so one walk along a path passes every
 // chat on it. Subagents float behind their parent like cherubs, small, in
-// tiered ranks (see RANK_*); a WAR swarm of a hundred or more fills a rising
-// stand behind its chat. One floor label per shared `phase`
+// a fan that rises from its chat's base (see RANK_*); a WAR swarm of a hundred
+// or more spreads into a tail behind its chat. One floor label per shared `phase`
 // (PIN-21). A session takes the next free slot when first seen and
 // keeps it, so nothing moves when another chat arrives: the room is spatial
 // memory. When the relay's chat list leaves chats out (the CHATS pick, or a
@@ -48,23 +48,33 @@ export const PATHS = Object.freeze([
 ]);
 /** The largest sideways swing of any path. */
 export const PATH_SWING = Math.max(...PATHS.map((p) => p.swing));
-// Cherub slots (at parent scale 1): ranks behind the parent, like seats in a
-// stand. Each rank holds RANK_COLS cherubs RANK_STEP apart, filled from the
-// middle out; the first rank stands on the floor RANK_FIRST behind the
-// parent, just clear of its base, and each rank after it RANK_BACK further
-// back and RANK_RISE higher, so the fan rises from the parent's base, and
-// every cherub shows over the rank in front, and spreads RANK_FAN wider than
-// it, so a big swarm fans out like a tail. The ranks run diagonally away
-// from both the path and the center (the parent's `back`), so the stands of
-// neighboring chats, even on two paths, run side by side and never cross.
-export const RANK_COLS = 6;
+// Cherub slots (at parent scale 1): a fan whose point is the parent's base.
+// Rank r holds rankSeats(r) cherubs RANK_STEP apart, filled from the middle
+// out: one cherub at the point, then one more every RANK_GROW ranks, so the
+// fan widens as it goes back. The first rank stands on the floor RANK_FIRST
+// behind the parent, just clear of its base, and each rank after it RANK_BACK
+// further back and RANK_RISE higher, so every cherub shows over the rank in
+// front. The fan runs diagonally away from both the path and the center (the
+// parent's `back`), so the fans of neighboring chats, even on two paths, run
+// side by side and never cross.
 export const RANK_STEP = 0.6;
+export const RANK_GROW = 3;
 export const RANK_FIRST = 0.9; // the parent's base reaches 0.6 m back, a cherub's 0.18 m forward
 export const RANK_BACK = 0.55;
 export const RANK_BASE = 0; // the first rank stands on the floor
 export const RANK_RISE = 0.35;
-export const RANK_FAN = 0.03; // each rank spreads this much wider than the one in front, so the stand fans out
-const RANK_ORDER = Object.freeze([-0.5, 0.5, -1.5, 1.5, -2.5, 2.5]); // column offsets, middle out
+
+/** How many cherubs rank r holds: one at the fan's point, one more every RANK_GROW ranks. */
+export const rankSeats = (r) => 1 + Math.floor(r / RANK_GROW);
+
+/** Cherub n's rank and its seat offset across the rank, in RANK_STEPs from the middle, filled middle out. */
+export function fanSeat(n) {
+  let r = 0;
+  while (n >= rankSeats(r)) n -= rankSeats(r++);
+  const m = rankSeats(r);
+  const order = [...Array(m).keys()].map((j) => j - (m - 1) / 2).sort((a, b) => Math.abs(a) - Math.abs(b) || a - b);
+  return { rank: r, across: order[n] };
+}
 export const BOB_M = 0.05; // cherubs bob this far up and down
 const BOB_HZ = 0.25;
 const STORE_KEY = 'obelisks.slots.v3'; // slot numbers keep their order on the path, so v3 maps still apply
@@ -282,13 +292,12 @@ export function rootSlotPoint(n) {
 }
 
 /**
- * Cherub slot n of a parent at `(x, y, z)` whose back is `(ox, oz)`: rank
- * floor(n / RANK_COLS), filled from the middle out, each rank further back and
- * higher. Returns the cherub's `{x, y, z, ox, oz}`; its own cherubs rank the same way behind it.
+ * Cherub slot n of a parent at `(x, y, z)` whose back is `(ox, oz)`: its seat
+ * in the fan (`fanSeat`), each rank further back and higher. Returns the cherub's `{x, y, z, ox, oz}`; its own cherubs rank the same way behind it.
  */
 export function childSlotPoint(n, { x, y = 0, z, ox, oz }, scale = 1) {
-  const rank = Math.floor(n / RANK_COLS);
-  const across = RANK_ORDER[n % RANK_COLS] * RANK_STEP * (1 + rank * RANK_FAN) * scale;
+  const { rank, across: seat } = fanSeat(n);
+  const across = seat * RANK_STEP * scale;
   const back = (RANK_FIRST + rank * RANK_BACK) * scale;
   return {
     x: x + -oz * across + ox * back,
