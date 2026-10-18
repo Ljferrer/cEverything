@@ -18,7 +18,13 @@
 //
 // A sound file can override any cue: install fetches /sfx/<name>.ogg, else
 // /sfx/<name>.mp3, for each name in SFX_CUES (Vite serves public/sfx/ there).
-// A file that loads and decodes plays for its cue; any other cue uses the synth.
+// A file that loads and decodes plays for its cue. Once any file loads, the
+// synth is off for every cue, so the room never mixes the two. Cues stay
+// silent until every load settles, and the synth plays only if none loaded.
+//
+// One sound per action: the first cue in a task wins and later cues in the
+// same task stay silent. A fork pinch sends `fork` inside the `select`
+// dispatch, and a voice error re-emits the relay `error` as `talk error`.
 import { pylonFor } from '../pylon-map.js';
 
 const MASTER_GAIN = 0.22;
@@ -130,6 +136,20 @@ export async function loadSfx(name, { fetchImpl = globalThis.fetch, decode }) {
   return null;
 }
 
+/**
+ * True for the first call in a task, false for the rest until `schedule`
+ * runs its callback (a microtask by default, after the current dispatch).
+ */
+export function createOnePerTick(schedule = queueMicrotask) {
+  let taken = false;
+  return () => {
+    if (taken) return false;
+    taken = true;
+    schedule(() => (taken = false));
+    return true;
+  };
+}
+
 /** Replace `net.send` with one that sends first, then reports the command; a throw in `onCommand` never reaches the caller. */
 export function wrapSend(net, onCommand) {
   const send = net.send;
@@ -158,13 +178,22 @@ export function install({ bus, net }) {
   const decode = (buf) => acReady.then((ctx) => ctx.decodeAudioData(buf));
   /** @type {Map<string, AudioBuffer>} file name -> decoded override */
   const sfx = new Map();
-  for (const name of SFX_CUES) loadSfx(name, { decode }).then((buf) => buf && sfx.set(name, buf));
+  let pending = SFX_CUES.length;
+  for (const name of SFX_CUES) {
+    loadSfx(name, { decode }).then((buf) => {
+      if (buf) sfx.set(name, buf);
+      pending--;
+    });
+  }
+  const onePerTick = createOnePerTick();
 
   const play = (cue) => {
     if (!cue || muted || ac?.state !== 'running') return;
-    if (isAmbient(cue) && !limiter.take(performance.now())) return;
-    const t = ac.currentTime + 0.01;
     const file = sfx.get(fileFor(cue));
+    if (!file && (pending > 0 || sfx.size > 0)) return;
+    if (isAmbient(cue) && !limiter.take(performance.now())) return;
+    if (!onePerTick()) return;
+    const t = ac.currentTime + 0.01;
     if (file) {
       const src = ac.createBufferSource();
       src.buffer = file;
