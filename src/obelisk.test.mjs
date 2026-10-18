@@ -28,7 +28,7 @@ registerHooks({
 });
 
 const { Text } = await import('troika-three-text');
-const { Obelisk, STACK_BOTTOM } = await import('./obelisk.js');
+const { Obelisk, STACK_BOTTOM, TITLE_SIZE } = await import('./obelisk.js');
 const { BAR_HEIGHT } = await import('./stack.js');
 
 // Oracle measurement, independent of stack.js: about 30 characters per
@@ -166,4 +166,32 @@ test('slabMesh returns the slab object for an id, null for an unknown one', () =
   assert.deepEqual(m.userData, { sid: 's1', slabId: 'a1' });
   assert.equal(m.parent, o.stack, 'the returned object is the one placed in the stack');
   assert.equal(o.slabMesh('zz'), null);
+});
+
+test('update turns the obelisk about Y to face the camera, so its text never reads mirrored', () => {
+  const o = new Obelisk({ sid: 'face', title: 'T', status: 'idle' });
+  const cam = (x, z) => {
+    const c = new THREE.Object3D();
+    c.position.set(x, STACK_BOTTOM, z);
+    c.updateMatrixWorld(true);
+    return c;
+  };
+  for (const [x, z] of [[0, 3], [3, 0], [0, -4], [-2, -2]]) {
+    o.update(cam(x, z));
+    o.updateMatrixWorld(true);
+    const facing = new THREE.Vector3(0, 0, 1).applyQuaternion(o.quaternion);
+    const toCam = new THREE.Vector3(x, 0, z).normalize();
+    assert.ok(facing.dot(toCam) > 0.999, `camera at (${x}, ${z}): facing ${facing.toArray().map((n) => n.toFixed(2))}`);
+    assert.equal(o.rotation.x, 0);
+    assert.equal(o.rotation.z, 0);
+  }
+});
+
+test('the title sits on top of the stack and the beacon above the title', () => {
+  const o = new Obelisk({ sid: 'top', title: 'A title', status: 'waiting' });
+  o.addSlab({ id: 'x1', role: 'user', text: 'one' });
+  o.addSlab({ id: 'x2', role: 'assistant', text: 'two' });
+  const topOfStack = Math.max(...o.slabs.map((s) => s.position.y)) + STACK_BOTTOM;
+  assert.ok(o.title.position.y > topOfStack, `title ${o.title.position.y} above stack top ${topOfStack}`);
+  assert.ok(o.beacon.position.y > o.title.position.y + 3 * TITLE_SIZE, 'beacon clears a three-line title');
 });

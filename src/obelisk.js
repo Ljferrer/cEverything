@@ -19,10 +19,12 @@ export const BASE_HEIGHT = 0.1;
 export const SLAB_WIDTH = 0.6;
 export const STACK_BOTTOM = BASE_HEIGHT + 0.16; // room above the base for the title
 export const MAX_VISIBLE = 40;
+export const TITLE_SIZE = 0.09;
 export const MAX_KEPT = 200; // older slabs are disposed; the relay caches the same count
 
 const _slabPos = new THREE.Vector3();
 const _camPos = new THREE.Vector3();
+const _selfPos = new THREE.Vector3();
 
 function makeText(text, fontSize, color, onSync) {
   const t = new Text();
@@ -57,8 +59,9 @@ export class Obelisk extends THREE.Group {
     this.base.userData = { sid: session.sid, kind: 'base' };
     this.add(this.base);
 
-    this.title = makeText(session.title, 0.06, 0xffffff);
-    this.title.position.y = BASE_HEIGHT + 0.02;
+    // The title rides on top of the stack (set in #layoutStack), where it stays
+    // readable from across the room instead of hiding under the slabs.
+    this.title = makeText(session.title, TITLE_SIZE, 0xffffff);
     this.title.userData = { sid: session.sid, kind: 'base' }; // a title hit selects the obelisk, like its base
     this.add(this.title);
 
@@ -158,6 +161,11 @@ export class Obelisk extends THREE.Group {
   /** Per frame: pick each visible slab's LOD band from its distance to the camera. */
   update(camera) {
     camera.getWorldPosition(_camPos);
+    // Turn about the vertical axis to face the viewer, so slab text never
+    // reads mirrored from an orbit camera outside the ring. A headset at the
+    // room center sees the same facing room.js's lookAt(0, 0, 0) gave.
+    this.getWorldPosition(_selfPos);
+    this.rotation.set(0, Math.atan2(_camPos.x - _selfPos.x, _camPos.z - _selfPos.z), 0);
     for (const slab of this.slabs) {
       if (!slab.visible) continue;
       slab.getWorldPosition(_slabPos);
@@ -214,7 +222,8 @@ export class Obelisk extends THREE.Group {
       slab.visible = i >= firstVisible;
       if (slab.visible) slab.position.y = offsets[i - firstVisible];
     });
-    this.beacon.position.y = STACK_BOTTOM + height + 0.25;
+    this.title.position.y = STACK_BOTTOM + height + 0.04;
+    this.beacon.position.y = STACK_BOTTOM + height + 0.55; // above a title of up to three lines
   }
 
   #drop(slab) {
