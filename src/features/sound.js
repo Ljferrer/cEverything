@@ -15,6 +15,10 @@
 // included). Ambient cues (new sessions, waiting, tools) pass a token bucket,
 // so a replay burst plays at most a few sounds per second. The M key and a
 // small speaker button under the laptop mode label toggle mute.
+//
+// A sound file can override any cue: install fetches /sfx/<name>.ogg, else
+// /sfx/<name>.mp3, for each name in SFX_CUES (Vite serves public/sfx/ there).
+// A file that loads and decodes plays for its cue; any other cue uses the synth.
 import { pylonFor } from '../pylon-map.js';
 
 const MASTER_GAIN = 0.22;
@@ -93,6 +97,39 @@ export function createLimiter({ rate = AMBIENT_RATE, burst = AMBIENT_BURST } = {
   };
 }
 
+/** Every override file name under /sfx/, without its extension. */
+export const SFX_CUES = Object.freeze([
+  'select', 'slab', 'miss', 'spawn', 'waiting',
+  'tool-browser', 'tool-filesystem', 'tool-shell', 'tool-other', 'tool-complete',
+  'fork', 'pipe', 'say', 'voice-start', 'voice-sent', 'voice-dropped', 'error',
+]);
+export const SFX_EXTS = Object.freeze(['ogg', 'mp3']);
+const FILE_NAMES = { talkStart: 'voice-start', talkSent: 'voice-sent', dropped: 'voice-dropped' };
+
+/** The override file name for a cue: `tool:shell` -> `tool-shell`, every `done:*` -> `tool-complete`. */
+export function fileFor(cue) {
+  const [name, pylon] = cue.split(':');
+  if (name === 'tool') return `tool-${pylon}`;
+  if (name === 'done') return 'tool-complete';
+  return FILE_NAMES[name] ?? name;
+}
+
+/**
+ * Try /sfx/<name>.ogg, then .mp3: the first that fetches as non-HTML and
+ * decodes wins. Resolves the decoded buffer, or null for the synth. Vite's dev
+ * server answers a missing file with index.html and status 200, so HTML is a miss.
+ */
+export async function loadSfx(name, { fetchImpl = globalThis.fetch, decode }) {
+  for (const ext of SFX_EXTS) {
+    try {
+      const res = await fetchImpl(`/sfx/${name}.${ext}`);
+      if (!res.ok || /text\/html/.test(res.headers.get('content-type') ?? '')) continue;
+      return await decode(await res.arrayBuffer());
+    } catch {}
+  }
+  return null;
+}
+
 /** Replace `net.send` with one that sends first, then reports the command; a throw in `onCommand` never reaches the caller. */
 export function wrapSend(net, onCommand) {
   const send = net.send;
@@ -115,11 +152,28 @@ export function install({ bus, net }) {
   let noise = null;
   let muted = readMuted();
 
+  // Override files: fetch now, decode once the first gesture creates the AudioContext.
+  let audioReady;
+  const acReady = new Promise((resolve) => (audioReady = resolve));
+  const decode = (buf) => acReady.then((ctx) => ctx.decodeAudioData(buf));
+  /** @type {Map<string, AudioBuffer>} file name -> decoded override */
+  const sfx = new Map();
+  for (const name of SFX_CUES) loadSfx(name, { decode }).then((buf) => buf && sfx.set(name, buf));
+
   const play = (cue) => {
     if (!cue || muted || ac?.state !== 'running') return;
     if (isAmbient(cue) && !limiter.take(performance.now())) return;
+    const t = ac.currentTime + 0.01;
+    const file = sfx.get(fileFor(cue));
+    if (file) {
+      const src = ac.createBufferSource();
+      src.buffer = file;
+      src.connect(out);
+      src.start(t);
+      return;
+    }
     const [name, pylon] = cue.split(':');
-    RECIPES[name]?.(synth, ac.currentTime + 0.01, pylon);
+    RECIPES[name]?.(synth, t, pylon);
   };
   const on = (type) => bus.addEventListener(type, (e) => play(map(type, e.detail)));
   for (const type of ['select', 'miss', 'session', 'state', 'tool', 'talk', 'error']) on(type);
@@ -166,6 +220,7 @@ export function install({ bus, net }) {
       noise = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
       const data = noise.getChannelData(0);
       for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+      audioReady(ac);
     }
     if (ac.state === 'suspended') ac.resume();
   };
