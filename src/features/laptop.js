@@ -14,12 +14,14 @@ import { hitToEvent, applySelection, rootOf, shouldInstallLaptop, latchLast } fr
 export const ERROR_MS = 4000;
 
 /**
- * Where the laptop camera starts: up and out on a diagonal, past the obelisk
- * ring, its child rings, and the pylons, so the first view shows the whole room
- * instead of near-band text from the closest obelisk. main.js's (0, 1.6, 3) sits
- * on the ring; a headset ignores this because its pose drives the camera.
+ * Where the laptop camera starts: up and behind the viewer's spot, looking down
+ * the obelisk grid, so the first view shows the rows instead of near-band text
+ * from the closest obelisk. A headset ignores this because its pose drives the
+ * camera.
  */
-export const LAPTOP_START = Object.freeze([7, 6, 7]);
+export const LAPTOP_START = Object.freeze([0, 6, 6]);
+/** Where the laptop camera looks: the middle of the first two rows of obelisks. */
+export const LAPTOP_TARGET = Object.freeze([0, 1, -6]);
 
 /** The say box target line shows the selected obelisk's title, else its sid, and follows a later retitle. */
 export function showTarget(bus, node, findObelisk) {
@@ -61,7 +63,7 @@ export async function install({ camera, renderer, bus, net }) {
 
   // Orbit camera; OrbitControls handles touch (one finger rotates, two pan and zoom).
   const controls = new OrbitControls(camera, renderer.domElement);
-  controls.target.set(0, 1, 0);
+  controls.target.set(...LAPTOP_TARGET);
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI * 0.49;
   bus.addEventListener('frame', () => controls.update());
