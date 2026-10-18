@@ -28,8 +28,9 @@ registerHooks({
 });
 
 const { Text } = await import('troika-three-text');
-const { Obelisk, STACK_BOTTOM, TITLE_SIZE } = await import('./obelisk.js');
-const { BAR_HEIGHT } = await import('./stack.js');
+const { Obelisk, STACK_BOTTOM, TITLE_SIZE, BASE_HEIGHT, MIN_BODY_TOP, glyphFor } = await import('./obelisk.js');
+const { BAR_HEIGHT, SLAB_GAP } = await import('./stack.js');
+const { stateColor, MONOLITH_BLACK } = await import('./colors.js');
 
 // Oracle measurement, independent of stack.js: about 30 characters per
 // wrapped line at fontSize 0.04, 0.048 m per line, anchorY bottom.
@@ -194,4 +195,66 @@ test('the title sits on top of the stack and the beacon above the title', () => 
   const topOfStack = Math.max(...o.slabs.map((s) => s.position.y)) + STACK_BOTTOM;
   assert.ok(o.title.position.y > topOfStack, `title ${o.title.position.y} above stack top ${topOfStack}`);
   assert.ok(o.beacon.position.y > o.title.position.y + 3 * TITLE_SIZE, 'beacon clears a three-line title');
+});
+
+test('two obelisks get different glyphs, each a symbol and a two-digit number', () => {
+  const a = new Obelisk({ sid: 'glyph-a', title: 'A', status: 'idle' });
+  const b = new Obelisk({ sid: 'glyph-b', title: 'B', status: 'idle' });
+  assert.match(a.glyph.text, /^\S \d{2}$/);
+  assert.match(b.glyph.text, /^\S \d{2}$/);
+  assert.notEqual(a.glyph.text, b.glyph.text);
+  assert.equal(Number(b.glyph.text.slice(-2)), Number(a.glyph.text.slice(-2)) + 1, 'numbered in creation order');
+});
+
+test('the glyph is stable for a sid, even for a rebuilt obelisk', () => {
+  const first = new Obelisk({ sid: 'glyph-stable', title: 'S', status: 'idle' });
+  new Obelisk({ sid: 'glyph-other', title: 'O', status: 'idle' });
+  const again = new Obelisk({ sid: 'glyph-stable', title: 'S', status: 'idle' });
+  assert.equal(again.glyph.text, first.glyph.text);
+  assert.equal(glyphFor('glyph-stable'), first.glyph.text);
+});
+
+test('a short stack stands as a tall monolith with the glyph at its top', () => {
+  const o = roomWith(SHORT);
+  const top = o.body.position.y + o.body.scale.y / 2;
+  assert.ok(Math.abs(top - MIN_BODY_TOP) < 1e-9, `body top ${top}`);
+  assert.ok(o.glyph.position.y > o.sound.position.y && o.sound.position.y > o.title.position.y + measure(o.title.text));
+  assert.ok(top - (o.glyph.position.y + measure(o.glyph.text)) < 0.1, 'the glyph sits at the top');
+});
+
+test('the body reaches from the base to above the glyph and grows with a tall stack', () => {
+  const o = roomWith([...LONG, ...LONG, ...LONG]);
+  const bottom = () => o.body.position.y - o.body.scale.y / 2;
+  const top = () => o.body.position.y + o.body.scale.y / 2;
+  const stackTop = o.slabs.at(-1).position.y + measure(LONG.at(-1)) + STACK_BOTTOM;
+  assert.ok(Math.abs(bottom() - BASE_HEIGHT) < 1e-9, `body bottom ${bottom()} sits on the base`);
+  assert.ok(top() > MIN_BODY_TOP, 'this stack is taller than the floor');
+  assert.ok(o.title.position.y > stackTop && o.glyph.position.y > o.sound.position.y && o.sound.position.y > o.title.position.y, 'stack, title, SOUND ONLY, glyph, bottom to top');
+  assert.ok(top() > o.glyph.position.y + measure(o.glyph.text), 'the body clears the glyph');
+  assert.ok(o.beacon.position.y > top(), 'the beacon rides above the body');
+  assert.ok(o.body.position.z + o.body.scale.z / 2 < 0, 'the body stands behind the slab text');
+  const before = o.body.scale.y;
+  const text = 'a fourth slab that wraps onto two lines';
+  o.addSlab({ id: 'a9', role: 'user', text });
+  flushSyncs();
+  assert.ok(Math.abs(o.body.scale.y - before - (measure(text) + SLAB_GAP)) < 1e-9, 'the body grows by the new slab and its gap');
+});
+
+test('setState still recolors the base, not the shared body', () => {
+  const o = new Obelisk({ sid: 'state', title: 'S', status: 'idle' });
+  o.setState('error');
+  assert.equal(o.base.material.color.getHex(), stateColor('error'));
+  assert.equal(o.children.find((c) => c.userData?.kind === 'base'), o.base, "state.js's baseOf still finds the base");
+  assert.equal(o.body.material.color.getHex(), MONOLITH_BLACK);
+  o.setBeacon(true);
+  assert.equal(o.beacon.visible, true);
+});
+
+test('a ray through the body between slabs is not a pick', () => {
+  const o = roomWith(SHORT);
+  const ray = new THREE.Raycaster(new THREE.Vector3(0.33, 0.5, 2), new THREE.Vector3(0, 0, -1));
+  const hits = ray.intersectObject(o, true).map((h) => h.object);
+  assert.ok(hits.length === 0, `no hit, got ${hits.map((h) => h.type)}`);
+  const into = new THREE.Raycaster(new THREE.Vector3(0, BASE_HEIGHT / 2, 2), new THREE.Vector3(0, 0, -1));
+  assert.equal(into.intersectObject(o, true)[0]?.object, o.base, 'the base still takes a pick in front of the body');
 });

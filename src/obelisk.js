@@ -1,5 +1,7 @@
 // One session = one obelisk (PIN-1): a wireframe base box, a title label, and
-// a vertical stack of message slabs, newest on top. Each frame `update(camera)`
+// a vertical stack of message slabs, newest on top. The look is a homage to the
+// SEELE monoliths: a matte black body with red edges stands behind the stack,
+// and a red glyph ("Ψ 03") over a red "SOUND ONLY" line tops it. Each frame `update(camera)`
 // picks a LOD band per slab (PIN-13) and shows full text, the mid summary, or a
 // role-colored bar. Slabs stack by measured height (src/stack.js): troika lays
 // text out asynchronously, so every `sync` re-runs the layout when it completes,
@@ -7,11 +9,13 @@
 // `setState`, `setBeacon`, and `slabMesh` are the later plans' seams.
 //
 // Pick targets (PIN-22): every slab mesh carries userData {sid, slabId} and the
-// base carries userData {sid, kind:'base'}.
+// base carries userData {sid, kind:'base'}. The body, its edges, the glyph, and
+// the SOUND ONLY line never take a pick: a ray that misses a slab must not
+// land on the body and fork the session.
 import * as THREE from 'three';
 import { Text } from 'troika-three-text';
 import { lod, midSummary } from './lod.js';
-import { colorFor, stateColor } from './colors.js';
+import { colorFor, stateColor, MONOLITH_BLACK, MONOLITH_RED } from './colors.js';
 import { BAR_HEIGHT, slabHeight, stackLayout } from './stack.js';
 
 export const BASE_SIZE = 0.5;
@@ -21,6 +25,36 @@ export const STACK_BOTTOM = BASE_HEIGHT + 0.16; // room above the base for the t
 export const MAX_VISIBLE = 40;
 export const TITLE_SIZE = 0.09;
 export const MAX_KEPT = 200; // older slabs are disposed; the relay caches the same count
+export const BODY_WIDTH = 0.72;
+export const BODY_DEPTH = 0.06;
+export const GLYPH_SIZE = 0.2;
+export const SOUND_SIZE = 0.045;
+export const MIN_BODY_TOP = 1.8; // a short stack still stands as a tall monolith
+const BODY_GAP = 0.02; // the body's front face sits this far behind the slab text
+
+// Shared by every obelisk: the body is a unit box scaled to the stack height.
+const BODY_GEOMETRY = new THREE.BoxGeometry(1, 1, 1);
+const BODY_MATERIAL = new THREE.MeshBasicMaterial({ color: MONOLITH_BLACK });
+const EDGE_GEOMETRY = new THREE.EdgesGeometry(BODY_GEOMETRY);
+const EDGE_MATERIAL = new THREE.LineBasicMaterial({ color: MONOLITH_RED });
+const noPick = () => {};
+
+const SYMBOLS = ['Δ', 'Θ', 'Λ', 'Ξ', 'Π', 'Σ', 'Φ', 'Ψ', 'Ω', 'Γ'];
+const numbers = new Map(); // sid -> creation-order number, so a rebuilt obelisk keeps its glyph
+
+/** The red glyph for a sid: a symbol from a hash of the sid, then its two-digit creation number. */
+export function glyphFor(sid) {
+  if (!numbers.has(sid)) numbers.set(sid, numbers.size + 1);
+  let h = 0x811c9dc5; // FNV-1a
+  for (let i = 0; i < sid.length; i++) h = Math.imul(h ^ sid.charCodeAt(i), 0x01000193);
+  return `${SYMBOLS[(h >>> 0) % SYMBOLS.length]} ${String(numbers.get(sid)).padStart(2, '0')}`;
+}
+
+/** A text's measured height once troika has laid it out, else `fallback`. */
+function textHeight(t, fallback) {
+  const b = t.textRenderInfo?.blockBounds;
+  return b ? b[3] - b[1] : fallback;
+}
 
 const _slabPos = new THREE.Vector3();
 const _camPos = new THREE.Vector3();
@@ -61,9 +95,24 @@ export class Obelisk extends THREE.Group {
 
     // The title rides on top of the stack (set in #layoutStack), where it stays
     // readable from across the room instead of hiding under the slabs.
-    this.title = makeText(session.title, TITLE_SIZE, 0xffffff);
+    this.title = makeText(session.title, TITLE_SIZE, 0xffffff, () => this.#layoutStack());
     this.title.userData = { sid: session.sid, kind: 'base' }; // a title hit selects the obelisk, like its base
     this.add(this.title);
+
+    this.body = new THREE.Mesh(BODY_GEOMETRY, BODY_MATERIAL);
+    this.body.raycast = noPick;
+    const edges = new THREE.LineSegments(EDGE_GEOMETRY, EDGE_MATERIAL);
+    edges.raycast = noPick;
+    this.body.add(edges);
+    this.add(this.body);
+
+    this.glyph = makeText(glyphFor(session.sid), GLYPH_SIZE, MONOLITH_RED, () => this.#layoutStack());
+    this.glyph.raycast = noPick;
+    this.add(this.glyph);
+    this.sound = makeText('SOUND ONLY', SOUND_SIZE, MONOLITH_RED, () => this.#layoutStack());
+    this.sound.letterSpacing = 0.15;
+    this.sound.raycast = noPick;
+    this.add(this.sound);
 
     this.stack = new THREE.Group();
     this.stack.position.y = STACK_BOTTOM;
@@ -83,7 +132,7 @@ export class Obelisk extends THREE.Group {
     this.session.title = title;
     if (this.title.text !== title) {
       this.title.text = title;
-      this.title.sync();
+      this.title.sync(() => this.#layoutStack());
     }
   }
 
@@ -178,6 +227,8 @@ export class Obelisk extends THREE.Group {
     for (const slab of this.slabs) this.#drop(slab);
     this.slabs.length = 0;
     this.title.dispose();
+    this.glyph.dispose();
+    this.sound.dispose(); // the body's geometry and materials are shared, so they stay
     this.base.geometry.dispose();
     this.base.material.dispose();
     this.beacon.geometry.dispose();
@@ -210,7 +261,10 @@ export class Obelisk extends THREE.Group {
 
   // Oldest at the bottom, newest on top, each slab's bottom at the summed
   // measured heights of the slabs below it; only the last MAX_VISIBLE show,
-  // slabs past MAX_KEPT are disposed, and the beacon rides above the top.
+  // slabs past MAX_KEPT are disposed. Above the stack go the title, the SOUND
+  // ONLY line, and the glyph; the body reaches from the base to above the
+  // glyph, at least to MIN_BODY_TOP with the glyph at its top, and the beacon
+  // rides above the body.
   #layoutStack() {
     while (this.slabs.length > MAX_KEPT) this.#drop(this.slabs.shift());
     const firstVisible = Math.max(0, this.slabs.length - MAX_VISIBLE);
@@ -223,7 +277,15 @@ export class Obelisk extends THREE.Group {
       if (slab.visible) slab.position.y = offsets[i - firstVisible];
     });
     this.title.position.y = STACK_BOTTOM + height + 0.04;
-    this.beacon.position.y = STACK_BOTTOM + height + 0.55; // above a title of up to three lines
+    const soundH = textHeight(this.sound, SOUND_SIZE * 1.2);
+    const glyphH = textHeight(this.glyph, GLYPH_SIZE * 1.2);
+    const titleTop = this.title.position.y + textHeight(this.title, TITLE_SIZE * 1.2);
+    const top = Math.max(titleTop + 0.04 + soundH + 0.02 + glyphH + 0.06, MIN_BODY_TOP);
+    this.glyph.position.y = top - 0.06 - glyphH;
+    this.sound.position.y = this.glyph.position.y - 0.02 - soundH;
+    this.body.scale.set(BODY_WIDTH, top - BASE_HEIGHT, BODY_DEPTH);
+    this.body.position.set(0, (BASE_HEIGHT + top) / 2, -(BODY_GAP + BODY_DEPTH / 2));
+    this.beacon.position.y = top + 0.25;
   }
 
   #drop(slab) {
