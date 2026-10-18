@@ -65,49 +65,52 @@ test('a third root moves neither earlier root', async () => {
   assert.ok(pos('c').distanceTo(a) > 1 && pos('c').distanceTo(b) > 1);
 });
 
-test('a new cherub moves no sibling, and cherubs float small on both sides of their parent', async () => {
+test('a new cherub moves no sibling, and cherubs float small in ranks behind their parent', async () => {
   store.clear();
   const { mod, session, pos } = await room();
   session('p');
-  session('k1', 'p', 'research');
-  session('k2', 'p', 'research');
+  for (let k = 0; k < 8; k++) session(`k${k}`, 'p', 'research');
   const k1 = pos('k1');
-  const k2 = pos('k2');
-  session('k3', 'p', 'build');
-  assert.ok(pos('k1').equals(k1));
-  assert.ok(pos('k2').equals(k2));
+  session('k9', 'p', 'build');
+  assert.ok(pos('k1').equals(k1), 'a new cherub moves no sibling');
   const { ox, oz } = mod.rootSlotPoint(0);
-  const across = (k) => (pos(k).x - pos('p').x) * -oz + (pos(k).z - pos('p').z) * ox;
-  assert.ok(across('k1') > 1 && across('k2') < -1, 'the first two take opposite wings');
   const behind = (k) => (pos(k).x - pos('p').x) * ox + (pos(k).z - pos('p').z) * oz;
-  for (const k of ['k1', 'k2', 'k3']) assert.ok(behind(k) >= mod.WING_BACK - 1e-9, `${k} floats behind its parent, away from the path`);
-  for (const k of ['k1', 'k2', 'k3']) {
-    assert.ok(pos(k).y >= mod.WING_BASE * 0.9, `${k} floats above the floor (y ${pos(k).y})`);
-    assert.equal(mod.getObelisk(k).scale.x, mod.CHILD_SCALE);
+  const across = (k) => (pos(k).x - pos('p').x) * -oz + (pos(k).z - pos('p').z) * ox;
+  for (let k = 0; k < 8; k++) {
+    assert.ok(behind(`k${k}`) >= mod.RANK_FIRST - 1e-9, `k${k} floats behind its parent`);
+    assert.ok(Math.abs(across(`k${k}`)) <= (mod.RANK_COLS / 2) * mod.RANK_STEP * (1 + mod.RANK_FAN) + 1e-9, `k${k} stays within its rank`);
+    assert.ok(pos(`k${k}`).y >= mod.RANK_BASE * 0.9, `k${k} floats above the floor`);
+    assert.equal(mod.getObelisk(`k${k}`).scale.x, mod.CHILD_SCALE);
   }
+  assert.ok(Math.abs(across('k0')) < mod.RANK_STEP && Math.abs(across('k1')) < mod.RANK_STEP, 'a rank fills from the middle out');
+  assert.ok(behind('k6') > behind('k0') && pos('k6').y > pos('k0').y, 'the next rank sits further back and higher');
 });
 
-test('a WAR swarm of 160 cherubs builds two wings that never collide or reach a neighbor chat', async () => {
+test('WAR swarms of 160 cherubs fill stands that never collide, with each other or any chat, on any path', async () => {
   store.clear();
   const { mod, session, pos } = await room();
-  for (let i = 0; i < 12; i++) session(`r${i}`);
+  const R = 12; // three chats on each path
+  for (let i = 0; i < R; i++) session(`r${i}`);
   const N = 160;
-  for (let k = 0; k < N; k++) session(`w${k}`, 'r0');
-  const cherubs = [...Array(N).keys()].map((k) => pos(`w${k}`));
-  for (let i = 0; i < N; i++) {
-    for (let j = i + 1; j < N; j++) assert.ok(cherubs[i].distanceTo(cherubs[j]) >= 0.5, `w${i} w${j} ${cherubs[i].distanceTo(cherubs[j]).toFixed(2)}`);
-  }
+  const swarms = [0, 1, 2, 3, 4, 5, 6, 7]; // the first two chats on every path, side by side and across the plaza
+  for (const r of swarms) for (let k = 0; k < N; k++) session(`w${r}-${k}`, `r${r}`);
+  const all = swarms.flatMap((r) => [...Array(N).keys()].map((k) => ({ r, p: pos(`w${r}-${k}`) })));
   const flat = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
-  for (const c of cherubs) {
-    assert.ok(flat(c, pos('r0')) >= 1, 'no cherub stands inside its parent');
-    for (let r = 1; r < 12; r++) assert.ok(flat(c, pos(`r${r}`)) >= 1.2, `a cherub reaches r${r}`);
+  for (let i = 0; i < all.length; i++) {
+    for (let j = i + 1; j < all.length; j++) {
+      const d = all[i].p.distanceTo(all[j].p);
+      if (d < 0.5) assert.fail(`cherubs of r${all[i].r} and r${all[j].r} meet (${d.toFixed(2)} m)`);
+    }
+    for (let r = 0; r < R; r++) {
+      if (r !== all[i].r && flat(all[i].p, pos(`r${r}`)) < 1.2) assert.fail(`a cherub of r${all[i].r} stands in r${r}`);
+    }
   }
-  // The next chat on the same path and side (slot 8) carries its own swarm: the two wings must not meet.
-  for (let k = 0; k < N; k++) session(`v${k}`, 'r8');
-  for (let k = 0; k < N; k++) {
-    for (let j = 0; j < N; j++) assert.ok(pos(`w${k}`).distanceTo(pos(`v${j}`)) >= 0.5, `w${k} meets v${j}`);
-  }
-  assert.ok(Math.max(...cherubs.map((c) => c.y)) > 10, 'a big swarm towers over the path');
+  const one = all.filter((c) => c.r === 0).map((c) => c.p);
+  assert.ok(Math.max(...one.map((c) => c.y)) < 12, 'a stand, not a tower');
+  assert.ok(Math.max(...one.map((c) => flat(c, pos('r0')))) > 8, 'the ranks run far behind the chat');
+  const { ox, oz } = mod.rootSlotPoint(0);
+  const width = (cs) => { const a = cs.map((c) => (c.x - pos('r0').x) * -oz + (c.z - pos('r0').z) * ox); return Math.max(...a) - Math.min(...a); };
+  assert.ok(width(one.slice(-6)) > width(one.slice(0, 6)) * 1.3, 'the back rank spreads wider than the front: a fan, not a pillar');
 });
 
 test('a reload with a stored slot map restores every position', async () => {

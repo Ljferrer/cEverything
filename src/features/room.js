@@ -7,9 +7,9 @@
 // same way round, and their swings differ, so the four never read as a
 // pinwheel or any rotational symbol. Chats fill the paths in
 // turn and alternate sides along each, so one walk along a path passes every
-// chat on it. Subagents float beside their parent like cherubs, small,
-// in two wings that sweep back and rise; a WAR swarm of a hundred or more
-// builds a tower of them on each side. One floor label per shared `phase`
+// chat on it. Subagents float behind their parent like cherubs, small, in
+// tiered ranks (see RANK_*); a WAR swarm of a hundred or more fills a rising
+// stand behind its chat. One floor label per shared `phase`
 // (PIN-21). A session takes the next free slot when first seen and
 // keeps it, so nothing ever moves: the room is spatial memory. The sid -> slot
 // map lives in localStorage, so a reload puts every known sid back where it
@@ -31,7 +31,7 @@ export const PATH_WIDTH = 1.4; // the width of every track on the floor
 // of path length, starting FIRST_S out (the center stays an open plaza).
 export const PATH_SIDE = 3.2;
 export const CHAT_GAP = 3.5; // room for both neighbors' wings, even on the inside of a bend
-export const FIRST_S = 7;
+export const FIRST_S = 12;
 /**
  * The four paths, in slot order. `(x, z)` is the heading; `bend` is the first
  * turn (+1 the walker's right, -1 the left); `swing` and `wave` set the curve
@@ -45,19 +45,22 @@ export const PATHS = Object.freeze([
 ]);
 /** The largest sideways swing of any path. */
 export const PATH_SWING = Math.max(...PATHS.map((p) => p.swing));
-// Cherub slots (at parent scale 1): even slots on the parent's left wing, odd
-// on its right. Each wing is WING_COLS wide, WING_INNER from the parent's
-// center, WING_STEP per column, and WING_BACK behind it (away from the path);
-// outer columns sweep back WING_SWEEP more and rise WING_LIFT, and each row of
-// a wing floats WING_ROW higher than the last.
-export const WING_COLS = 2;
-export const WING_INNER = 1.2;
-export const WING_STEP = 0.55;
-export const WING_BACK = 0.8;
-export const WING_SWEEP = 0.3;
-export const WING_LIFT = 0.2;
-export const WING_BASE = 0.7;
-export const WING_ROW = 0.7;
+// Cherub slots (at parent scale 1): ranks behind the parent, like seats in a
+// stand. Each rank holds RANK_COLS cherubs RANK_STEP apart, filled from the
+// middle out; the first rank floats RANK_FIRST behind the parent and RANK_BASE
+// up, and each rank after it RANK_BACK further back and RANK_RISE higher, so
+// every cherub shows over the rank in front, and spreads RANK_FAN wider than
+// it, so a big swarm fans out like a tail. The ranks run diagonally away
+// from both the path and the center (the parent's `back`), so the stands of
+// neighboring chats, even on two paths, run side by side and never cross.
+export const RANK_COLS = 6;
+export const RANK_STEP = 0.6;
+export const RANK_FIRST = 1.4;
+export const RANK_BACK = 0.55;
+export const RANK_BASE = 0.6;
+export const RANK_RISE = 0.35;
+export const RANK_FAN = 0.03; // each rank spreads this much wider than the one in front, so the stand fans out
+const RANK_ORDER = Object.freeze([-0.5, 0.5, -1.5, 1.5, -2.5, 2.5]); // column offsets, middle out
 export const BOB_M = 0.05; // cherubs bob this far up and down
 const BOB_HZ = 0.25;
 const STORE_KEY = 'obelisks.slots.v3'; // slot numbers keep their order on the path, so v3 maps still apply
@@ -225,36 +228,38 @@ export function pathPoint(k, s) {
   return { x: f.x * u + rx * side, z: f.z * u + rz * side, tx, tz, lx: tz, lz: -tx };
 }
 
-/** Root slot n: path n % 4, alternate sides along it, first on the left; `(ox, oz)` points away from the path. */
+/**
+ * Root slot n: path n % 4, alternate sides along it, first on the left.
+ * `(ox, oz)` is the chat's back: the unit direction its cherub ranks run,
+ * away from the path and out along it, half and half.
+ */
 export function rootSlotPoint(n) {
   const k = n % PATHS.length;
   const i = Math.floor(n / PATHS.length);
   const s = FIRST_S + i * CHAT_GAP;
   const p = pathPoint(k, s);
   const side = i % 2 === 0 ? 1 : -1; // +1 left, -1 right
-  const ox = side * p.lx;
-  const oz = side * p.lz;
-  return { x: p.x + ox * PATH_SIDE, z: p.z + oz * PATH_SIDE, ox, oz, s, path: k };
+  const sx = side * p.lx; // straight away from the path
+  const sz = side * p.lz;
+  const bx = sx + p.tx;
+  const bz = sz + p.tz;
+  const len = Math.hypot(bx, bz);
+  return { x: p.x + sx * PATH_SIDE, z: p.z + sz * PATH_SIDE, ox: bx / len, oz: bz / len, s, path: k };
 }
 
 /**
- * Cherub slot n of a parent at `(x, y, z)` whose back faces `(ox, oz)` (away
- * from the path): even slots fill the left wing, odd the right, column by
- * column, then row by row upward. Returns the cherub's `{x, y, z, ox, oz}`.
+ * Cherub slot n of a parent at `(x, y, z)` whose back is `(ox, oz)`: rank
+ * floor(n / RANK_COLS), filled from the middle out, each rank further back and
+ * higher. Returns the cherub's `{x, y, z, ox, oz}`; its own cherubs rank the same way behind it.
  */
 export function childSlotPoint(n, { x, y = 0, z, ox, oz }, scale = 1) {
-  const side = n % 2 === 0 ? 1 : -1; // one wing, then the other
-  const k = Math.floor(n / 2);
-  const col = k % WING_COLS;
-  const row = Math.floor(k / WING_COLS);
-  const lx = -oz; // across the parent: level, and square to its back
-  const lz = ox;
-  const across = (WING_INNER + col * WING_STEP) * side * scale;
-  const back = (WING_BACK + col * WING_SWEEP) * scale;
+  const rank = Math.floor(n / RANK_COLS);
+  const across = RANK_ORDER[n % RANK_COLS] * RANK_STEP * (1 + rank * RANK_FAN) * scale;
+  const back = (RANK_FIRST + rank * RANK_BACK) * scale;
   return {
-    x: x + lx * across + ox * back,
-    y: y + (WING_BASE + row * WING_ROW + col * WING_LIFT) * scale,
-    z: z + lz * across + oz * back,
+    x: x + -oz * across + ox * back,
+    y: y + (RANK_BASE + rank * RANK_RISE) * scale,
+    z: z + ox * across + oz * back,
     ox,
     oz,
   };
@@ -403,7 +408,7 @@ function place(o, { x, y = 0, z, ox, oz }, scale) {
   o.position.set(x, y, z);
   // A cherub floats: the frame loop bobs it about `y`, each on its own phase.
   o.userData.float = y > 0 ? { y, phase: (x * 7.3 + z * 3.1) % (2 * Math.PI) } : null;
-  o.userData.out = { x: ox, z: oz }; // away from the path; children line up behind it
+  o.userData.out = { x: ox, z: oz }; // the chat's back: its cherub ranks run this way
   o.scale.setScalar(scale);
   o.lookAt(0, 0, 0); // initial facing; obelisk.update(camera) turns it to the viewer
 }
