@@ -39,13 +39,13 @@ const STARTS_KEPT = 256; // remembered `start` args; a lost `complete` never lea
 /**
  * Far placement (PIN-51, revised for the winding path): the four monoliths
  * stand in a shallow arc past the end of the path (24 chats reach about
- * z = -60), so they loom at its end and every tool call arcs a long way out.
+ * z = -80), so they loom at its end and every tool call arcs a long way out.
  */
 export const PLACE = Object.freeze({
-  browser: { x: -28, z: -84 },
-  shell: { x: -10, z: -94 },
-  other: { x: 10, z: -94 },
-  filesystem: { x: 28, z: -84 },
+  browser: { x: -28, z: -98 },
+  shell: { x: -10, z: -108 },
+  other: { x: 10, z: -108 },
+  filesystem: { x: 28, z: -98 },
 });
 
 /** The face texture URL for a pylon name. */

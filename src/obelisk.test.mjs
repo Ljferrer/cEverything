@@ -401,3 +401,16 @@ test('the base and far bars are solid, shared, and still take their picks', () =
   const into = new THREE.Raycaster(new THREE.Vector3(0.1, BASE_HEIGHT / 2, 6), new THREE.Vector3(0, 0, -1)).intersectObject(a, true)[0];
   assert.equal(into?.object, a.base, 'the base, not its edges, takes the pick');
 });
+
+test('a subagent cherub keeps only its last CHERUB_KEPT slabs; a main chat keeps far more', async () => {
+  const { CHERUB_KEPT, MAX_KEPT } = await import('./obelisk.js');
+  const cherub = new Obelisk({ sid: 'cherub', title: 'c', status: 'idle', parent: 'main' });
+  const main = new Obelisk({ sid: 'main', title: 'm', status: 'idle', parent: null });
+  for (let i = 0; i < 12; i++) {
+    cherub.addSlab({ id: `c${i}`, role: 'assistant', text: `line ${i}` });
+    main.addSlab({ id: `m${i}`, role: 'assistant', text: `line ${i}` });
+  }
+  assert.deepEqual(cherub.slabs.map((s) => s.slabId), ['c8', 'c9', 'c10', 'c11'].slice(-CHERUB_KEPT), 'the cherub keeps its newest slabs');
+  assert.equal(main.slabs.length, 12);
+  assert.ok(MAX_KEPT > CHERUB_KEPT);
+});

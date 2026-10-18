@@ -65,7 +65,7 @@ test('a third root moves neither earlier root', async () => {
   assert.ok(pos('c').distanceTo(a) > 1 && pos('c').distanceTo(b) > 1);
 });
 
-test('a new child moves no sibling, and each stands in a row behind its parent', async () => {
+test('a new cherub moves no sibling, and cherubs float small on both sides of their parent', async () => {
   store.clear();
   const { mod, session, pos } = await room();
   session('p');
@@ -77,13 +77,37 @@ test('a new child moves no sibling, and each stands in a row behind its parent',
   assert.ok(pos('k1').equals(k1));
   assert.ok(pos('k2').equals(k2));
   const { ox, oz } = mod.rootSlotPoint(0);
+  const across = (k) => (pos(k).x - pos('p').x) * -oz + (pos(k).z - pos('p').z) * ox;
+  assert.ok(across('k1') > 1 && across('k2') < -1, 'the first two take opposite wings');
+  const behind = (k) => (pos(k).x - pos('p').x) * ox + (pos(k).z - pos('p').z) * oz;
+  for (const k of ['k1', 'k2', 'k3']) assert.ok(behind(k) >= mod.WING_BACK - 1e-9, `${k} floats behind its parent, away from the path`);
   for (const k of ['k1', 'k2', 'k3']) {
-    const dx = pos(k).x - pos('p').x;
-    const dz = pos(k).z - pos('p').z;
-    assert.ok(dx * ox + dz * oz > 1, `${k} stands behind its parent, away from the path`);
-    assert.ok(Math.abs(dx * -oz + dz * ox) <= 1.5 + 1e-9, `${k} within its parent's row length`);
+    assert.ok(pos(k).y >= mod.WING_BASE * 0.9, `${k} floats above the floor (y ${pos(k).y})`);
+    assert.equal(mod.getObelisk(k).scale.x, mod.CHILD_SCALE);
   }
-  assert.equal(mod.getObelisk('k3').scale.x, mod.CHILD_SCALE);
+});
+
+test('a WAR swarm of 160 cherubs builds two wings that never collide or reach a neighbor chat', async () => {
+  store.clear();
+  const { mod, session, pos } = await room();
+  for (let i = 0; i < 6; i++) session(`r${i}`);
+  const N = 160;
+  for (let k = 0; k < N; k++) session(`w${k}`, 'r2');
+  const cherubs = [...Array(N).keys()].map((k) => pos(`w${k}`));
+  for (let i = 0; i < N; i++) {
+    for (let j = i + 1; j < N; j++) assert.ok(cherubs[i].distanceTo(cherubs[j]) >= 0.5, `w${i} w${j} ${cherubs[i].distanceTo(cherubs[j]).toFixed(2)}`);
+  }
+  const flat = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+  for (const c of cherubs) {
+    assert.ok(flat(c, pos('r2')) >= 1, 'no cherub stands inside its parent');
+    for (const r of ['r0', 'r1', 'r3', 'r4', 'r5']) assert.ok(flat(c, pos(r)) >= 1.2, `a cherub reaches ${r}`);
+  }
+  // A neighbor on the same side carries its own swarm: the two wings must not meet.
+  for (let k = 0; k < N; k++) session(`v${k}`, 'r4');
+  for (let k = 0; k < N; k++) {
+    for (let j = 0; j < N; j++) assert.ok(pos(`w${k}`).distanceTo(pos(`v${j}`)) >= 0.5, `w${k} meets v${j}`);
+  }
+  assert.ok(Math.max(...cherubs.map((c) => c.y)) > 10, 'a big swarm towers over the path');
 });
 
 test('a reload with a stored slot map restores every position', async () => {

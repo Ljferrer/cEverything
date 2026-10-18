@@ -2,9 +2,10 @@
 // along a single winding path. A lit ribbon on the floor marks the path: it
 // leaves the viewer heading -z and swings left and right in a slow S toward
 // the tool monoliths. Chats alternate sides of it, so one walk along the path
-// passes every chat. Children stand in short rows behind their parent, on the
-// side away from the path, at 0.6 scale, with one floor label per shared
-// `phase` (PIN-21). A session takes the next free slot when first seen and
+// passes every chat. Subagents float beside their parent like cherubs, small,
+// in two wings that sweep back and rise; a WAR swarm of a hundred or more
+// builds a tower of them on each side. One floor label per shared `phase`
+// (PIN-21). A session takes the next free slot when first seen and
 // keeps it, so nothing ever moves: the room is spatial memory. The sid -> slot
 // map lives in localStorage, so a reload puts every known sid back where it
 // was. Routes `slab`, `delta`, and `state` to the matching obelisk.
@@ -14,7 +15,7 @@ import { Obelisk } from '../obelisk.js';
 
 export const RING_RADIUS = 3; // distance to the first row (kept for callers)
 export const CHILD_RADIUS = 1; // reach of a child row around its parent (kept for callers)
-export const CHILD_SCALE = 0.6;
+export const CHILD_SCALE = 0.3; // a subagent cherub, against its parent
 // The path: x = PATH_SWING * sin(2 pi u / PATH_WAVE) at depth z = -u, so it
 // starts on the viewer's line of sight and swings 5 m to each side.
 export const PATH_SWING = 5;
@@ -23,13 +24,23 @@ export const PATH_WIDTH = 1.4; // the lit ribbon on the floor
 // Root slots: alternate left and right of the path, PATH_SIDE from its center
 // line, one chat every CHAT_GAP of path length, starting FIRST_S along it.
 export const PATH_SIDE = 3.2;
-export const CHAT_GAP = 2.6;
+export const CHAT_GAP = 3.5; // room for both neighbors' wings, even on the inside of a bend
 export const FIRST_S = 3;
-// Child slots: rows of four running along the path, 1 m apart, starting
-// 1.6 m outward from the parent and stepping 1 m further out per row.
-const CHILD_ALONG = Object.freeze([-1.5, -0.5, 0.5, 1.5]);
-const CHILD_FIRST_ROW = 1.6;
-const CHILD_ROW_GAP = 1;
+// Cherub slots (at parent scale 1): even slots on the parent's left wing, odd
+// on its right. Each wing is WING_COLS wide, WING_INNER from the parent's
+// center, WING_STEP per column, and WING_BACK behind it (away from the path);
+// outer columns sweep back WING_SWEEP more and rise WING_LIFT, and each row of
+// a wing floats WING_ROW higher than the last.
+export const WING_COLS = 2;
+export const WING_INNER = 1.2;
+export const WING_STEP = 0.55;
+export const WING_BACK = 0.8;
+export const WING_SWEEP = 0.3;
+export const WING_LIFT = 0.2;
+export const WING_BASE = 0.7;
+export const WING_ROW = 0.7;
+export const BOB_M = 0.05; // cherubs bob this far up and down
+const BOB_HZ = 0.25;
 const STORE_KEY = 'obelisks.slots.v3'; // slot numbers keep their order on the path, so v3 maps still apply
 
 /** @type {Map<string, Obelisk>} */
@@ -69,7 +80,12 @@ export function install({ scene, bus }) {
   bus.addEventListener('delta', shown((d) => getObelisk(d.sid)?.appendDelta(d)));
   bus.addEventListener('state', shown((d) => getObelisk(d.sid)?.setState(d.status)));
   bus.addEventListener('frame', (e) => {
-    for (const o of obelisks.values()) o.update(e.detail.camera);
+    const t = (e.detail.now ?? performance.now()) / 1000;
+    for (const o of obelisks.values()) {
+      const f = o.userData.float;
+      if (f) o.position.y = f.y + BOB_M * Math.sin(2 * Math.PI * BOB_HZ * t + f.phase);
+      o.update(e.detail.camera);
+    }
   });
 }
 
@@ -183,12 +199,27 @@ export function rootSlotPoint(n) {
   return { x: p.x + ox * PATH_SIDE, z: p.z + oz * PATH_SIDE, ox, oz, s };
 }
 
-/** Child slot n of a parent at `(x, z)` facing away from the path along `(ox, oz)`: rows along the path, behind the parent. */
-export function childSlotPoint(n, { x, z, ox, oz }, scale = 1) {
-  const along = CHILD_ALONG[n % CHILD_ALONG.length];
-  const row = Math.floor(n / CHILD_ALONG.length);
-  const out = (CHILD_FIRST_ROW + row * CHILD_ROW_GAP) * scale;
-  return { x: x + ox * out - oz * along * scale, z: z + oz * out + ox * along * scale, ox, oz };
+/**
+ * Cherub slot n of a parent at `(x, y, z)` whose back faces `(ox, oz)` (away
+ * from the path): even slots fill the left wing, odd the right, column by
+ * column, then row by row upward. Returns the cherub's `{x, y, z, ox, oz}`.
+ */
+export function childSlotPoint(n, { x, y = 0, z, ox, oz }, scale = 1) {
+  const side = n % 2 === 0 ? 1 : -1; // one wing, then the other
+  const k = Math.floor(n / 2);
+  const col = k % WING_COLS;
+  const row = Math.floor(k / WING_COLS);
+  const lx = -oz; // across the parent: level, and square to its back
+  const lz = ox;
+  const across = (WING_INNER + col * WING_STEP) * side * scale;
+  const back = (WING_BACK + col * WING_SWEEP) * scale;
+  return {
+    x: x + lx * across + ox * back,
+    y: y + (WING_BASE + row * WING_ROW + col * WING_LIFT) * scale,
+    z: z + lz * across + oz * back,
+    ox,
+    oz,
+  };
 }
 
 /** A flat ribbon PATH_WIDTH wide along the path from 0 to `length` meters, just above the floor. */
@@ -228,8 +259,10 @@ function layPath(farthest) {
 }
 
 
-function place(o, { x, z, ox, oz }, scale) {
-  o.position.set(x, 0, z);
+function place(o, { x, y = 0, z, ox, oz }, scale) {
+  o.position.set(x, y, z);
+  // A cherub floats: the frame loop bobs it about `y`, each on its own phase.
+  o.userData.float = y > 0 ? { y, phase: (x * 7.3 + z * 3.1) % (2 * Math.PI) } : null;
   o.userData.out = { x: ox, z: oz }; // away from the path; children line up behind it
   o.scale.setScalar(scale);
   o.lookAt(0, 0, 0); // initial facing; obelisk.update(camera) turns it to the viewer
@@ -264,7 +297,8 @@ function placeChildren(parent, all, seen) {
   for (const child of children) {
     const slot = childSlot(child.sid, parent.sid);
     const { out } = parent.userData;
-    const p = childSlotPoint(slot, { x: parent.position.x, z: parent.position.z, ox: out.x, oz: out.z }, parent.scale.x);
+    const base = parent.userData.float?.y ?? parent.position.y;
+    const p = childSlotPoint(slot, { x: parent.position.x, y: base, z: parent.position.z, ox: out.x, oz: out.z }, parent.scale.x);
     place(child, p, parent.scale.x * CHILD_SCALE);
     placeChildren(child, all, seen);
     if (child.session.phase) {
