@@ -26,7 +26,7 @@ registerHooks({
   },
 });
 
-const { createTimeline, createPlayer, playGap, timeOf, toolStartFor, FRAME_TYPES, MAX_PLAY_GAP_MS } = await import('./timeline.js');
+const { createTimeline, createPlayer, playGap, timeOf, toolStartFor, FRAME_TYPES, MAX_PLAY_GAP_MS, SPEEDS, DEFAULT_SPEED } = await import('./timeline.js');
 
 function fakeBus() {
   const bus = Object.assign(new EventTarget(), { selected: null, selectedSlab: null });
@@ -295,4 +295,21 @@ test('play steps forward at the recorded pace until LIVE, and pause holds the fr
   assert.equal(player.playing, false, 'playback stops at LIVE');
   assert.equal(timers.pending, null);
   assert.equal(ticks, 4);
+});
+
+test('play waits playGap divided by the speed, and a speed change applies from the next wait', () => {
+  const bus = fakeBus();
+  let clock = 0;
+  const gaps = [0, 400, 400, 400, 400];
+  const tl = createTimeline(bus, { now: () => (clock += gaps.shift()) });
+  for (const f of [session('a'), slab('a', 's1', 'one'), slab('a', 's2', 'two'), slab('a', 's3', 'three'), slab('a', 's4', 'four')]) bus.emit(f.t, f);
+  const timers = fakeTimers();
+  let rate = 4;
+  const player = createPlayer(tl, { ...timers, speed: () => rate });
+  tl.scrubTo(0);
+  player.play();
+  rate = 0.5; // the wait already scheduled keeps its 4x delay
+  assert.equal(timers.run(), 100, '400 ms at 4x waits 100 ms');
+  assert.equal(timers.run(), 800, 'the next wait takes the new speed');
+  assert.equal(SPEEDS[DEFAULT_SPEED], 1, 'the slider starts at real time');
 });
