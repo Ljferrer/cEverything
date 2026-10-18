@@ -12,7 +12,7 @@ import { getObelisk as roomGetObelisk } from './room.js';
 import { PYLONS, pylonFor, shouldFire, diffCounts } from '../pylon-map.js';
 import { createPool } from '../projectile.js';
 
-export const PYLON_RADIUS = 5;
+export const PYLON_RADIUS = 5; // legacy; placement now comes from PLACE
 export const PYLON_HEIGHT = 3;
 export const PYLON_WIDTH = 0.6;
 export const GLOW_MS = 2000;
@@ -20,12 +20,16 @@ const BASE_COLOR = new THREE.Color(0x546e7a); // slate, the idle state color
 const GLOW_COLOR = new THREE.Color(0xffffff);
 const STARTS_KEPT = 256; // remembered `start` args; a lost `complete` never leaks past this
 
-/** Compass placement (PIN-51): browser north, filesystem east, shell south, other west. */
-const PLACE = Object.freeze({
-  browser: { x: 0, z: -PYLON_RADIUS },
-  filesystem: { x: PYLON_RADIUS, z: 0 },
-  shell: { x: 0, z: PYLON_RADIUS },
-  other: { x: -PYLON_RADIUS, z: 0 },
+/**
+ * Wall placement (PIN-51, revised for the walkable grid): two pylons on each
+ * side wall, outside the obelisk grid (columns at x = -4, 0, 4), so the room
+ * floor stays clear to walk and every tool call flies across the room.
+ */
+export const PLACE = Object.freeze({
+  browser: { x: -8, z: -3 },
+  filesystem: { x: 8, z: -3 },
+  shell: { x: -8, z: -9 },
+  other: { x: 8, z: -9 },
 });
 
 const _from = new THREE.Vector3();

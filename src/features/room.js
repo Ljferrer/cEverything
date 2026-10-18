@@ -1,27 +1,28 @@
 // The shared room (PIN-22 seam): a floor grid, one obelisk per `session` on a
-// fixed grid of slots, children on a fixed 8-slot 1 m ring around their parent
-// at 0.6 scale with one floor label per shared `phase` (PIN-21). A session
-// takes the next free slot when first seen and keeps it, so nothing ever moves:
-// the room is spatial memory. The sid -> slot map lives in localStorage, so a
-// reload puts every known sid back where it was. Routes `slab`, `delta`, and
-// `state` to the matching obelisk. Later plans read `getObelisk(sid)` and
-// `allObelisks()`; they never edit this file.
+// walkable grid of fixed slots (rows of three, 4 m apart, receding from the
+// viewer), children in short rows behind their parent at 0.6 scale with one
+// floor label per shared `phase` (PIN-21). A session takes the next free slot
+// when first seen and keeps it, so nothing ever moves: the room is spatial
+// memory. The sid -> slot map lives in localStorage, so a reload puts every
+// known sid back where it was. Routes `slab`, `delta`, and `state` to the
+// matching obelisk. Later plans read `getObelisk(sid)` and `allObelisks()`.
 import * as THREE from 'three';
 import { Text } from 'troika-three-text';
 import { Obelisk } from '../obelisk.js';
 
-export const RING_RADIUS = 3;
-export const CHILD_RADIUS = 1;
+export const RING_RADIUS = 3; // distance to the first row (kept for callers)
+export const CHILD_RADIUS = 1; // reach of a child row around its parent (kept for callers)
 export const CHILD_SCALE = 0.6;
-const PHASE_LABEL_RADIUS = CHILD_RADIUS + 0.4;
-// 12 root slots at 30 deg on the 3 m ring, then rings of 12 from 7 m out, 2 m
-// apart. Outer slots sit half a step (15 deg) off the compass points, so they
-// stay 2.5 m clear of the tool pylons at 5 m (pylons.js).
-const RING_SLOTS = 12;
-const OUTER_RADIUS = 7;
-const OUTER_GAP = 2;
-const CHILD_SLOTS = 8;
-const STORE_KEY = 'obelisks.slots';
+// Root slots: rows of three columns, center first, 4 m between columns and 5 m
+// between rows, so there is room to walk between obelisks and their children.
+export const GRID_COLUMNS = Object.freeze([0, -4, 4]);
+export const FIRST_ROW_Z = -3;
+export const ROW_GAP = 5;
+// Child slots: rows of four behind the parent, 0.8 m apart.
+const CHILD_COLUMNS = Object.freeze([-1.2, -0.4, 0.4, 1.2]);
+const CHILD_FIRST_ROW = 1.4; // meters behind the parent
+const CHILD_ROW_GAP = 1;
+const STORE_KEY = 'obelisks.slots.v2'; // v2: grid slots; ring-era maps are ignored
 
 /** @type {Map<string, Obelisk>} */
 const obelisks = new Map();
@@ -111,20 +112,19 @@ function childSlot(sid, parent) {
   return slots.child[sid].slot;
 }
 
-// Slot n of the root grid; angle 0 is straight ahead of the default camera (-z).
 export function rootSlotPoint(n) {
-  const inner = n < RING_SLOTS;
-  const ring = inner ? 0 : Math.floor((n - RING_SLOTS) / RING_SLOTS);
-  const radius = inner ? RING_RADIUS : OUTER_RADIUS + ring * OUTER_GAP;
-  const step = inner ? n : ((n - RING_SLOTS) % RING_SLOTS) + 0.5;
-  return ringPoint(step / RING_SLOTS, radius, 0, 0);
+  const col = n % GRID_COLUMNS.length;
+  const row = Math.floor(n / GRID_COLUMNS.length);
+  return { x: GRID_COLUMNS[col], z: FIRST_ROW_Z - row * ROW_GAP };
 }
 
-// Fraction f of a turn on a ring, starting at -z.
-function ringPoint(f, radius, cx, cz) {
-  const a = f * Math.PI * 2;
-  return { x: cx + radius * Math.sin(a), z: cz - radius * Math.cos(a), a };
+/** Child slot n behind a parent at (px, pz), scaled with the parent. */
+export function childSlotPoint(n, px, pz, scale = 1) {
+  const col = n % CHILD_COLUMNS.length;
+  const row = Math.floor(n / CHILD_COLUMNS.length);
+  return { x: px + CHILD_COLUMNS[col] * scale, z: pz - (CHILD_FIRST_ROW + row * CHILD_ROW_GAP) * scale };
 }
+
 
 function place(o, x, z, scale) {
   o.position.set(x, 0, z);
@@ -154,18 +154,18 @@ export function layout() {
 function placeChildren(parent, all, seen) {
   const children = all.filter((o) => o.session.parent === parent.sid);
   if (!children.length) return;
-  const arcs = new Map(); // phase -> angles of its children
+  const rows = new Map(); // phase -> positions of its children
   for (const child of children) {
     const slot = childSlot(child.sid, parent.sid);
-    const p = ringPoint(slot / CHILD_SLOTS, CHILD_RADIUS, parent.position.x, parent.position.z);
+    const p = childSlotPoint(slot, parent.position.x, parent.position.z, parent.scale.x);
     place(child, p.x, p.z, parent.scale.x * CHILD_SCALE);
     placeChildren(child, all, seen);
     if (child.session.phase) {
-      if (!arcs.has(child.session.phase)) arcs.set(child.session.phase, []);
-      arcs.get(child.session.phase).push(p.a);
+      if (!rows.has(child.session.phase)) rows.set(child.session.phase, []);
+      rows.get(child.session.phase).push(p);
     }
   }
-  for (const [phase, angles] of arcs) {
+  for (const [phase, points] of rows) {
     const key = `${parent.sid}\u0000${phase}`;
     seen.add(key);
     let label = phaseLabels.get(key);
@@ -183,12 +183,9 @@ function placeChildren(parent, all, seen) {
       phaseLabels.set(key, label);
       room.add(label);
     }
-    // The label sits at the circular mean of its children's slot angles.
-    const mid = Math.atan2(
-      angles.reduce((s, a) => s + Math.sin(a), 0),
-      angles.reduce((s, a) => s + Math.cos(a), 0),
-    );
-    const r = PHASE_LABEL_RADIUS * parent.scale.x;
-    label.position.set(parent.position.x + r * Math.sin(mid), 0.01, parent.position.z - r * Math.cos(mid));
+    // The label lies on the floor just in front of its children's rows.
+    const x = points.reduce((sum, q) => sum + q.x, 0) / points.length;
+    const z = Math.max(...points.map((q) => q.z)) + 0.45 * parent.scale.x;
+    label.position.set(x, 0.01, z);
   }
 }

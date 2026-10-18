@@ -26,7 +26,7 @@ registerHooks({
   },
 });
 
-const { PYLON_RADIUS } = await import('./pylons.js');
+const { PLACE } = await import('./pylons.js');
 
 let fresh = 0;
 const store = new Map();
@@ -60,11 +60,11 @@ test('a third root moves neither earlier root', async () => {
   session('c');
   assert.ok(pos('a').equals(a));
   assert.ok(pos('b').equals(b));
-  assert.ok(Math.abs(pos('c').length() - mod.RING_RADIUS) < 1e-9);
+  assert.deepEqual([pos('c').x, pos('c').z], [mod.GRID_COLUMNS[2], mod.FIRST_ROW_Z]);
   assert.ok(pos('c').distanceTo(a) > 1 && pos('c').distanceTo(b) > 1);
 });
 
-test('a new child moves no sibling, and each sits 1 m from its parent', async () => {
+test('a new child moves no sibling, and each stands in a row behind its parent', async () => {
   store.clear();
   const { mod, session, pos } = await room();
   session('p');
@@ -76,7 +76,8 @@ test('a new child moves no sibling, and each sits 1 m from its parent', async ()
   assert.ok(pos('k1').equals(k1));
   assert.ok(pos('k2').equals(k2));
   for (const k of ['k1', 'k2', 'k3']) {
-    assert.ok(Math.abs(pos(k).distanceTo(pos('p')) - mod.CHILD_RADIUS) < 1e-9);
+    assert.ok(pos(k).z < pos('p').z - 1, `${k} behind its parent`);
+    assert.ok(Math.abs(pos(k).x - pos('p').x) <= 1.2 + 1e-9, `${k} within its parent's row width`);
   }
   assert.equal(mod.getObelisk('k3').scale.x, mod.CHILD_SCALE);
 });
@@ -117,22 +118,15 @@ test('the room works with no localStorage at all', async () => {
   }
 });
 
-test('the 13th root lands on the 7 m ring, 2 m clear of every pylon', async () => {
+test('roots fill rows of three, 4 m apart, receding 5 m per row, and every slot stays clear of every pylon', async () => {
   store.clear();
-  const { session, pos } = await room();
-  for (let i = 0; i < 13; i++) session(`r${i}`);
-  const p = pos('r12');
-  assert.ok(Math.abs(p.length() - 7) < 1e-9);
-  const pylons = [
-    [0, -PYLON_RADIUS],
-    [PYLON_RADIUS, 0],
-    [0, PYLON_RADIUS],
-    [-PYLON_RADIUS, 0],
-  ];
-  // Every outer-ring slot, not just the 13th, stays clear.
-  for (let i = 13; i < 24; i++) session(`r${i}`);
-  for (let i = 12; i < 24; i++) {
-    const q = pos(`r${i}`);
-    for (const [x, z] of pylons) assert.ok(Math.hypot(q.x - x, q.z - z) >= 2, `r${i}`);
+  const { mod, session, pos } = await room();
+  for (let i = 0; i < 9; i++) session(`r${i}`);
+  assert.deepEqual([pos('r0').x, pos('r0').z], [0, mod.FIRST_ROW_Z]);
+  assert.deepEqual([pos('r1').x, pos('r1').z], [-4, mod.FIRST_ROW_Z]);
+  assert.deepEqual([pos('r3').x, pos('r3').z], [0, mod.FIRST_ROW_Z - mod.ROW_GAP]);
+  for (let i = 0; i < 9; i++) {
+    for (let j = i + 1; j < 9; j++) assert.ok(pos(`r${i}`).distanceTo(pos(`r${j}`)) >= 4, `r${i} r${j}`);
+    for (const { x, z } of Object.values(PLACE)) assert.ok(Math.hypot(pos(`r${i}`).x - x, pos(`r${i}`).z - z) >= 3, `r${i} vs pylon`);
   }
 });
