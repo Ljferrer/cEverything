@@ -51,13 +51,29 @@ export function install({ scene, bus }) {
   room.add(new THREE.GridHelper(12, 24, 0x335566, 0x1b2a33));
   scene.add(room);
 
-  bus.addEventListener('session', (e) => onSession(e.detail));
-  bus.addEventListener('slab', (e) => getObelisk(e.detail.sid)?.addSlab(e.detail));
-  bus.addEventListener('delta', (e) => getObelisk(e.detail.sid)?.appendDelta(e.detail));
-  bus.addEventListener('state', (e) => getObelisk(e.detail.sid)?.setState(e.detail.status));
+  // While timeline.js holds the room scrubbed back (`bus.scrubbed`), only its re-emitted (`replayed`) frames apply.
+  const shown = (fn) => (e) => (!bus.scrubbed || e.detail?.replayed) && fn(e.detail);
+  bus.addEventListener('session', shown(onSession));
+  bus.addEventListener('slab', shown((d) => getObelisk(d.sid)?.addSlab(d)));
+  bus.addEventListener('delta', shown((d) => getObelisk(d.sid)?.appendDelta(d)));
+  bus.addEventListener('state', shown((d) => getObelisk(d.sid)?.setState(d.status)));
   bus.addEventListener('frame', (e) => {
     for (const o of obelisks.values()) o.update(e.detail.camera);
   });
+}
+
+/** Remove every obelisk and phase label from the scene; the slot map stays, so a rebuild lands in the same places. */
+export function reset() {
+  for (const o of obelisks.values()) {
+    room?.remove(o);
+    o.dispose();
+  }
+  obelisks.clear();
+  for (const label of phaseLabels.values()) {
+    room?.remove(label);
+    label.dispose();
+  }
+  phaseLabels.clear();
 }
 
 function onSession(session) {
