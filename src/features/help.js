@@ -2,11 +2,22 @@
 // before Enter VR): step-by-step instructions to get into the room in a
 // headset and use it. Inside an immersive session the page DOM is hidden, so
 // the panel is for before you put the headset on, or for whoever helps you.
+// A QR code at the bottom opens the room on a phone, where LOOK AROUND turns
+// the phone into a forward-facing camera into the room (phone-camera.js).
+import QRCode from 'qrcode';
+import { viewLink } from '../input.js';
 export const STEPS = Object.freeze([
   'On the Quest, open Quest Browser.',
   'Open this page: type the address shown below, or scan the QR code on the laptop.',
   'Press Enter VR at the bottom of the page.',
   'Allow the microphone when the headset asks, so you can talk to agents.',
+]);
+
+/** How the phone camera QR code works, in order. */
+export const CAMERA_STEPS = Object.freeze([
+  'Scan this code with a phone to open the room on it.',
+  'Tap LOOK AROUND: the phone becomes a camera facing where it points.',
+  'Point the phone to look, and drag one finger to walk.',
 ]);
 
 export const CONTROLS = Object.freeze([
@@ -19,10 +30,20 @@ export const CONTROLS = Object.freeze([
   'Press the Meta button to leave VR.',
 ]);
 
-/** The address to type on the headset: this page's origin plus the edit key when the page has one. */
-export function headsetAddress(loc = location) {
-  const key = new URLSearchParams(loc.search).get('key');
-  return `${loc.host}/${key ? `?key=${encodeURIComponent(key)}` : ''}`;
+/**
+ * The address to type on the headset: the public tunnel's host (`?share=` or
+ * VITE_SHARE_URL) when there is one, else this page's host, plus the edit key
+ * when the page has one.
+ */
+export function headsetAddress(loc = location, env = import.meta.env) {
+  const params = new URLSearchParams(loc.search);
+  const key = params.get('key');
+  const shared = params.get('share') ?? env?.VITE_SHARE_URL;
+  let host = loc.host;
+  try {
+    if (shared) host = new URL(shared).host;
+  } catch {}
+  return `${host}/${key ? `?key=${encodeURIComponent(key)}` : ''}`;
 }
 
 export function install() {
@@ -43,6 +64,9 @@ export function install() {
     #headset-help .addr { display: block; margin: 8px 0; padding: 8px; font: 600 16px/1.3 ui-monospace, monospace; color: #fff;
       background: #1a1a1a; border-radius: 4px; word-break: break-all; }
     #headset-help .close { float: right; cursor: pointer; color: #aaa; background: none; border: 0; font-size: 20px; }
+    #headset-help .camera { display: flex; gap: 12px; align-items: center; }
+    #headset-help .camera canvas { flex: none; background: #fff; border-radius: 4px; }
+    #headset-help .camera .link { color: #999; font-size: 11px; word-break: break-all; }
   `;
   const button = document.createElement('button');
   button.id = 'headset-help-btn';
@@ -70,7 +94,18 @@ export function install() {
   const h2 = Object.assign(document.createElement('h4'), { textContent: 'In VR' });
   const controls = document.createElement('ul');
   for (const s of CONTROLS) controls.append(Object.assign(document.createElement('li'), { textContent: s }));
-  card.append(close, h, steps, addr, h2, controls);
+  const h3 = Object.assign(document.createElement('h4'), { textContent: 'Phone camera' });
+  const camera = Object.assign(document.createElement('div'), { className: 'camera' });
+  const qr = document.createElement('canvas');
+  qr.setAttribute('aria-label', 'QR code that opens the room on a phone');
+  const how = document.createElement('div');
+  const camSteps = document.createElement('ol');
+  for (const s of CAMERA_STEPS) camSteps.append(Object.assign(document.createElement('li'), { textContent: s }));
+  const link = viewLink();
+  how.append(camSteps, Object.assign(document.createElement('div'), { className: 'link', textContent: link }));
+  camera.append(qr, how);
+  QRCode.toCanvas(qr, link, { width: 132, margin: 1 }).catch(() => {});
+  card.append(close, h, steps, addr, h2, controls, h3, camera);
   overlay.append(card);
 
   const show = (on) => (overlay.hidden = !on);

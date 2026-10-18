@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import QRCode from 'qrcode';
 import { allObelisks, getObelisk } from './room.js';
-import { hitToEvent, applySelection, rootOf, shouldInstallLaptop, latchLast } from '../input.js';
+import { hitToEvent, applySelection, rootOf, shouldInstallLaptop, latchLast, viewLink } from '../input.js';
 
 export const ERROR_MS = 4000;
 
@@ -45,7 +45,6 @@ export function showErrors(bus, node) {
   });
 }
 
-/** The view link the QR code carries: `?share=<url>` when set, else the bare origin (never the edit key). */
 export const WALK_SPEED = 4; // meters per second for WASD / arrow keys (Shift doubles it)
 export const PUSH_DISTANCE = 1.2; // a wheel-in closer than this moves the orbit point forward instead of stalling
 export const PUSH_STEP = 0.6;
@@ -65,10 +64,6 @@ export function walkAxes(keys) {
     strafe: (has('e') ? 1 : 0) - (has('q') ? 1 : 0),
     turn: (has('a', 'arrowleft') ? 1 : 0) - (has('d', 'arrowright') ? 1 : 0),
   };
-}
-
-export function viewLink(loc = location) {
-  return new URLSearchParams(loc.search).get('share') ?? loc.origin;
 }
 
 // Installs on `?mode=laptop`, without `navigator.xr`, or when immersive-vr is

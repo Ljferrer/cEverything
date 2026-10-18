@@ -73,3 +73,12 @@ export async function shouldInstallLaptop(loc = location, nav = navigator) {
     return true;
   }
 }
+
+/**
+ * The view link a QR code carries, never the edit key: `?share=<url>` when
+ * set, else the public tunnel the dev server was started with
+ * (VITE_SHARE_URL, e.g. in .env.local), else the bare origin.
+ */
+export function viewLink(loc = location, env = import.meta.env) {
+  return new URLSearchParams(loc.search).get('share') ?? (env?.VITE_SHARE_URL || loc.origin);
+}
