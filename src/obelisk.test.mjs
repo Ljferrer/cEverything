@@ -414,3 +414,24 @@ test('a subagent cherub keeps only its last CHERUB_KEPT slabs; a main chat keeps
   assert.equal(main.slabs.length, 12);
   assert.ok(MAX_KEPT > CHERUB_KEPT);
 });
+
+test('past its detail range an obelisk shows only its monolith, and its slabs come back when the viewer nears', async () => {
+  const { DETAIL_M, CHERUB_DETAIL_M } = await import('./obelisk.js');
+  const o = roomWith(SHORT);
+  const parts = () => [o.stack, o.title, o.glyph, o.sound].map((p) => p.parent === o);
+  o.update(cameraAt(DETAIL_M + 5));
+  assert.equal(o.detail, false);
+  assert.deepEqual(parts(), [false, false, false, false], 'slabs, title, glyph and SOUND ONLY leave the scene graph');
+  assert.equal(o.body.parent, o, 'the monolith stays');
+  assert.equal(o.base.parent, o, 'the base stays, so the obelisk can still be picked');
+  let drawn = 0;
+  o.traverseVisible((c) => (drawn += c.isMesh || c.isLine ? 1 : 0));
+  assert.ok(drawn <= 4, `a distant obelisk draws at most 4 objects, not ${drawn}`);
+  o.update(cameraAt(1));
+  assert.equal(o.detail, true);
+  assert.deepEqual(parts(), [true, true, true, true]);
+  assert.ok(o.slabs.every((s) => s.band === 'near'), 'the slabs pick their band again on return');
+  const cherub = new Obelisk({ sid: 'c', title: 'c', status: 'idle', parent: 'p' });
+  cherub.update(cameraAt(CHERUB_DETAIL_M + 1));
+  assert.equal(cherub.detail, false, 'a cherub drops its detail much sooner');
+});
