@@ -25,6 +25,12 @@ test('ES1 pylonFor maps every listed name, the browser_ prefix, mcp__ browser wo
     Glob: 'filesystem',
     NotebookEdit: 'filesystem',
     Bash: 'shell',
+    // Codex
+    shell: 'shell',
+    local_shell: 'shell',
+    exec_command: 'shell',
+    exec: 'shell',
+    apply_patch: 'filesystem',
     // prefix and mcp rules
     browser_x: 'browser',
     mcp__Claude_Browser__navigate: 'browser',

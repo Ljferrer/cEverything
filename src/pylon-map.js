@@ -1,6 +1,6 @@
 // Pure tool-name helpers for the pylons feature (plan 4). Imports nothing from
 // three (PIN-56) so `node --test` runs it bare. One table keys on tool names
-// from both harnesses; the client never branches on harness name (PIN-19).
+// from every harness; the client never branches on harness name (PIN-19).
 
 /** Pylon per plain tool name (PIN-12). Plain names match case-sensitively. */
 const TABLE = Object.freeze({
@@ -23,6 +23,12 @@ const TABLE = Object.freeze({
   Glob: 'filesystem',
   NotebookEdit: 'filesystem',
   Bash: 'shell',
+  // Codex
+  shell: 'shell',
+  local_shell: 'shell',
+  exec_command: 'shell',
+  exec: 'shell',
+  apply_patch: 'filesystem',
 });
 
 /** The only case-insensitive rule: an `mcp__` name that names a browser tool. */

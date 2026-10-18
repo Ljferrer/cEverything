@@ -6,6 +6,7 @@ const serverFrames = [
   { t: 'mode', mode: 'synthetic', canEdit: false },
   { t: 'session', sid: 's1', harness: 'hermes', kind: 'chat', title: 'Plan', status: 'idle', parent: null, phase: null },
   { t: 'session', sid: 's2', harness: 'claude', kind: 'agent', title: 'Agent', status: 'working', parent: 's1', phase: 'research' },
+  { t: 'session', sid: 's3', harness: 'codex', kind: 'chat', title: 'Codex', status: 'waiting' },
   { t: 'slab', sid: 's1', id: 'm1', role: 'user', text: 'hi', ts: 1 },
   { t: 'slab', sid: 's1', id: 'm2', role: 'thinking', text: 'hmm', ts: 2 },
   { t: 'delta', sid: 's1', id: 'm3', role: 'assistant', text: 'par' },

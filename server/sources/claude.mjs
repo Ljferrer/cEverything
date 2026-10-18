@@ -56,7 +56,7 @@ function rememberSlab(sid, frame) {
 const cut = (s, n) => (s.length > n ? s.slice(0, n) : s);
 
 /** Cut every string inside `v` (deeply) to TEXT_CAP characters. */
-function capStrings(v) {
+export function capStrings(v) {
   if (typeof v === 'string') return cut(v, TEXT_CAP);
   if (Array.isArray(v)) return v.map(capStrings);
   if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, capStrings(x)]));
@@ -64,7 +64,7 @@ function capStrings(v) {
 }
 
 /** Drop every key whose value is `undefined` so no frame carries one (PIN-43). */
-function compact(o) {
+export function compact(o) {
   return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
 }
 
@@ -165,7 +165,7 @@ export function mapLine(obj, pending, sid) {
 // ---- configuration ---------------------------------------------------------
 
 /** `--name value` or `--name=value` from argv, else undefined. */
-function argOf(name, argv = process.argv) {
+export function argOf(name, argv = process.argv) {
   const flag = `--${name}`;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === flag && i + 1 < argv.length) return argv[i + 1];
@@ -174,7 +174,7 @@ function argOf(name, argv = process.argv) {
   return undefined;
 }
 
-function numberOpt(given, env, flag, fallback) {
+export function numberOpt(given, env, flag, fallback) {
   const raw = given ?? process.env[env] ?? argOf(flag);
   const n = Number(raw);
   return raw !== undefined && raw !== '' && Number.isFinite(n) ? n : fallback;

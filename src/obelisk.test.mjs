@@ -28,9 +28,9 @@ registerHooks({
 });
 
 const { Text } = await import('troika-three-text');
-const { Obelisk, SLAB_WIDTH, STACK_BOTTOM, TITLE_SIZE, BASE_HEIGHT, MIN_BODY_TOP, CARD_PAD, glyphFor } = await import('./obelisk.js');
+const { Obelisk, SLAB_WIDTH, STACK_BOTTOM, TITLE_SIZE, BASE_HEIGHT, MIN_BODY_TOP, CARD_PAD, glyphFor, BODY_MATERIAL, CODEX_BODY_MATERIAL } = await import('./obelisk.js');
 const { BAR_HEIGHT, SLAB_GAP } = await import('./stack.js');
-const { stateColor, MONOLITH_BLACK, ROLE_COLORS } = await import('./colors.js');
+const { stateColor, MONOLITH_BLACK, MONOLITH_RED, CODEX_STONE, CODEX_TEAL, ROLE_COLORS } = await import('./colors.js');
 
 // Oracle measurement, independent of stack.js: about 30 characters per
 // wrapped line at fontSize 0.04, 0.048 m per line, anchorY bottom.
@@ -400,4 +400,40 @@ test('the base and far bars are solid, shared, and still take their picks', () =
   assert.deepEqual(hit.object.userData, { sid: 'cards', slabId: bar.slabId });
   const into = new THREE.Raycaster(new THREE.Vector3(0.1, BASE_HEIGHT / 2, 6), new THREE.Vector3(0, 0, -1)).intersectObject(a, true)[0];
   assert.equal(into?.object, a.base, 'the base, not its edges, takes the pick');
+});
+
+test('the obelisk picks its look from session.harness: Codex is teal stone, every other harness stays SEELE', () => {
+  const look = (harness) => {
+    const o = new Obelisk({ sid: `look-${harness}`, title: 't', status: 'idle', harness });
+    const [edges] = o.body.children;
+    const [baseEdges] = o.base.children;
+    return { o, body: o.body.material, edge: edges.material.color.getHex(), baseEdge: baseEdges.material.color.getHex(), glyph: o.glyph, sound: o.sound.text };
+  };
+  const codex = look('codex');
+  assert.equal(codex.body, CODEX_BODY_MATERIAL);
+  assert.equal(codex.body.color.getHex(), CODEX_STONE);
+  assert.equal(codex.edge, CODEX_TEAL);
+  assert.equal(codex.baseEdge, CODEX_TEAL);
+  assert.equal(codex.glyph.color, CODEX_TEAL);
+  assert.match(codex.glyph.text, /^(>_|\$_|\{ \}|\[ \]|<\/>|::|#!|~\/) \d{2}$/);
+  assert.equal(codex.sound, 'CODEX');
+  for (const harness of ['claude', 'hermes', 'synthetic', undefined]) {
+    const seele = look(harness);
+    assert.equal(seele.body, BODY_MATERIAL, String(harness));
+    assert.equal(seele.edge, MONOLITH_RED);
+    assert.equal(seele.baseEdge, MONOLITH_RED);
+    assert.equal(seele.glyph.color, MONOLITH_RED);
+    assert.match(seele.glyph.text, /^[ΔΘΛΞΠΣΦΨΩΓ] \d{2}$/);
+    assert.equal(seele.sound, 'SOUND ONLY');
+  }
+  // Pick targets do not change with the look: the base and title select, the body never picks.
+  assert.deepEqual(codex.o.base.userData, { sid: 'look-codex', kind: 'base' });
+  assert.deepEqual(codex.o.title.userData, { sid: 'look-codex', kind: 'base' });
+  const ray = new THREE.Raycaster(new THREE.Vector3(0, 1, 5), new THREE.Vector3(0, 0, -1));
+  codex.o.updateMatrixWorld(true);
+  const hits = [];
+  codex.o.body.raycast(ray, hits);
+  assert.equal(hits.length, 0);
+  THREE.Mesh.prototype.raycast.call(codex.o.body, ray, hits); // the same ray does cross the body
+  assert.ok(hits.length > 0);
 });

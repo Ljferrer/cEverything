@@ -2,7 +2,7 @@
 // means. It reads the real color tables from colors.js, so it never drifts
 // from the scene. Laptop and phone only (the same rule as laptop.js); the
 // open/closed choice is a per-viewer convenience kept in localStorage.
-import { ROLE_COLORS, STATE_COLORS } from '../colors.js';
+import { ROLE_COLORS, STATE_COLORS, MONOLITH_RED, CODEX_TEAL } from '../colors.js';
 import { shouldInstallLaptop } from '../input.js';
 
 const STORE_KEY = 'obelisks.legend.open';
@@ -21,11 +21,18 @@ export function legendSections() {
       rows: Object.entries(STATE_COLORS).map(([status, color]) => ({ swatch: hex(color), label: status })),
     },
     {
+      title: 'Monolith edges (harness)',
+      rows: [
+        { swatch: hex(MONOLITH_RED), label: 'Black stone, red edges: Claude Code or Hermes' },
+        { swatch: hex(CODEX_TEAL), label: 'Teal stone, teal edges, ">_" glyph: Codex' },
+      ],
+    },
+    {
       title: 'Shapes',
       rows: [
-        { label: 'Tall monolith: one chat (Hermes or Claude Code)' },
+        { label: 'Tall monolith: one chat (Hermes, Claude Code, or Codex)' },
         { label: 'Small monoliths beside it: its subagents' },
-        { label: 'Red glyph and number: the chat id' },
+        { label: 'Glyph and number: the chat id' },
         { label: 'White cone above: the chat waits for you' },
         { label: 'Wall pylons: browser, filesystem, shell, other tools' },
         { label: 'Flying spark: a tool call heading to its pylon' },
