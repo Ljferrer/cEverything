@@ -62,7 +62,9 @@ export function createTimeline(bus, { reset = () => {}, now = Date.now } = {}) {
       if (shownAt === null) return;
       if (shownAt + 1 >= log.length - 1) return timeline.goLive();
       shownAt += 1;
-      bus.emit(log[shownAt].type, { ...log[shownAt].frame, replayed: true });
+      // Playback steps one frame at a time, so it animates and sounds like live (`playback`);
+      // a rebuild (scrub, LIVE) re-emits frames in bulk and stays silent.
+      bus.emit(log[shownAt].type, { ...log[shownAt].frame, replayed: true, playback: true });
     },
     goLive() {
       if (shownAt === null) return;

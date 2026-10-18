@@ -175,6 +175,9 @@ test('pylons.js fires no projectile for a replayed start and ignores live tools 
   bus.scrubbed = false;
   bus.emit('tool', tool('a', 't3'));
   assert.equal(flying(), 1, 'a live start fires once the timeline is live');
+  bus.scrubbed = true;
+  bus.emit('tool', { ...tool('a', 't4'), replayed: true, playback: true });
+  assert.equal(flying(), 2, 'a start stepped through on Play fires like live');
 });
 
 /** A manual clock for createPlayer: `run()` fires the pending timer and returns its delay. */
@@ -207,6 +210,7 @@ test('advance shows the next frame by emitting only that frame, with no rebuild,
   assert.equal(resets, 1, 'advance never resets the room');
   assert.deepEqual(seen.map((s) => s.detail.id), ['s2']);
   assert.ok(seen[0].detail.replayed);
+  assert.ok(seen[0].detail.playback, 'a Play step is marked playback, so it animates and sounds');
   assert.equal(tl.index, 2);
   tl.advance();
   assert.equal(tl.live, true, 'the step to the newest frame is LIVE');
