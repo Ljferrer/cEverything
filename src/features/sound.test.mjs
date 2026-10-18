@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createMapper, createLimiter, isAmbient, pitchFor, PYLON_PITCH, wrapSend,
-  fileFor, loadSfx, SFX_CUES, SFX_EXTS,
+  fileFor, loadSfx, SFX_CUES, SFX_EXTS, createOnePerTick,
 } from './sound.js';
 
 test('select maps to select for a base and slab for a slab; miss maps to miss', () => {
@@ -182,4 +182,22 @@ test('loadSfx returns null for the synth on 404s, the Vite HTML fallback, or a n
     throw new TypeError('network');
   };
   assert.equal(await loadSfx('fork', { fetchImpl: throwing, decode }), null);
+});
+
+test('one cue per task: a fork sent inside the select dispatch silences the select cue', () => {
+  const queued = [];
+  const onePerTick = createOnePerTick((fn) => queued.push(fn));
+  assert.equal(onePerTick(), true, 'fork cue from wrapSend plays');
+  assert.equal(onePerTick(), false, 'select cue in the same dispatch stays silent');
+  assert.equal(onePerTick(), false, 'talk error after a relay error stays silent');
+  queued.shift()();
+  assert.equal(onePerTick(), true, 'the next task plays again');
+});
+
+test('one cue per task resets on the real microtask queue', async () => {
+  const onePerTick = createOnePerTick();
+  assert.equal(onePerTick(), true);
+  assert.equal(onePerTick(), false);
+  await Promise.resolve();
+  assert.equal(onePerTick(), true);
 });
