@@ -50,17 +50,18 @@ export const PATHS = Object.freeze([
 export const PATH_SWING = Math.max(...PATHS.map((p) => p.swing));
 // Cherub slots (at parent scale 1): ranks behind the parent, like seats in a
 // stand. Each rank holds RANK_COLS cherubs RANK_STEP apart, filled from the
-// middle out; the first rank floats RANK_FIRST behind the parent and RANK_BASE
-// up, and each rank after it RANK_BACK further back and RANK_RISE higher, so
+// middle out; the first rank stands on the floor RANK_FIRST behind the
+// parent, just clear of its base, and each rank after it RANK_BACK further
+// back and RANK_RISE higher, so the fan rises from the parent's base, and
 // every cherub shows over the rank in front, and spreads RANK_FAN wider than
 // it, so a big swarm fans out like a tail. The ranks run diagonally away
 // from both the path and the center (the parent's `back`), so the stands of
 // neighboring chats, even on two paths, run side by side and never cross.
 export const RANK_COLS = 6;
 export const RANK_STEP = 0.6;
-export const RANK_FIRST = 1.4;
+export const RANK_FIRST = 0.9; // the parent's base reaches 0.6 m back, a cherub's 0.18 m forward
 export const RANK_BACK = 0.55;
-export const RANK_BASE = 0.6;
+export const RANK_BASE = 0; // the first rank stands on the floor
 export const RANK_RISE = 0.35;
 export const RANK_FAN = 0.03; // each rank spreads this much wider than the one in front, so the stand fans out
 const RANK_ORDER = Object.freeze([-0.5, 0.5, -1.5, 1.5, -2.5, 2.5]); // column offsets, middle out
