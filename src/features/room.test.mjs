@@ -79,11 +79,13 @@ test('a new cherub moves no sibling, and cherubs float small in ranks behind the
   for (let k = 0; k < 8; k++) {
     assert.ok(behind(`k${k}`) >= mod.RANK_FIRST - 1e-9, `k${k} floats behind its parent`);
     assert.ok(Math.abs(across(`k${k}`)) <= (mod.RANK_COLS / 2) * mod.RANK_STEP * (1 + mod.RANK_FAN) + 1e-9, `k${k} stays within its rank`);
-    assert.ok(pos(`k${k}`).y >= mod.RANK_BASE * 0.9, `k${k} floats above the floor`);
+    assert.ok(pos(`k${k}`).y >= 0, `k${k} is never below the floor`);
     assert.equal(mod.getObelisk(`k${k}`).scale.x, mod.CHILD_SCALE);
   }
   assert.ok(Math.abs(across('k0')) < mod.RANK_STEP && Math.abs(across('k1')) < mod.RANK_STEP, 'a rank fills from the middle out');
   assert.ok(behind('k6') > behind('k0') && pos('k6').y > pos('k0').y, 'the next rank sits further back and higher');
+  assert.equal(pos('k0').y, 0, 'the fan starts on the floor at the parent\'s base');
+  assert.ok(behind('k0') < 1, 'right behind the parent');
 });
 
 test('WAR swarms of 160 cherubs fill stands that never collide, with each other or any chat, on any path', async () => {
@@ -103,6 +105,7 @@ test('WAR swarms of 160 cherubs fill stands that never collide, with each other 
     }
     for (let r = 0; r < R; r++) {
       if (r !== all[i].r && flat(all[i].p, pos(`r${r}`)) < 1.2) assert.fail(`a cherub of r${all[i].r} stands in r${r}`);
+      if (r === all[i].r && flat(all[i].p, pos(`r${r}`)) < 0.78) assert.fail(`a cherub of r${r} stands in its own parent's base`);
     }
   }
   const one = all.filter((c) => c.r === 0).map((c) => c.p);
