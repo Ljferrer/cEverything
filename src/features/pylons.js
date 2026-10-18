@@ -1,4 +1,4 @@
-// Pylons and projectiles (plan 4, PIN-2): four wireframe pylons at the compass
+// Pylons and projectiles (plan 4, PIN-2): four pylons at the compass
 // points, radius 5 m (PIN-51); a `tool` start fires a pooled sphere from the
 // calling slab (or the obelisk base) to the tool's pylon and lights the pylon
 // for 2 s (PIN-52, PIN-53, PIN-55); a filesystem `complete` writes the file's
@@ -7,24 +7,27 @@
 // tools are dropped (PIN-50). This is the only plan 4 file
 // that adds objects to the scene (PIN-56); it never edits plan 1's files.
 // Each pylon also has a textured face box inside its wireframe, from a
-// Higgsfield render in public/assets/pylon-<name>.jpg. The face stays hidden
-// until its texture loads, so a missing file keeps the plain wireframe look,
-// and the face brightens with the wireframe during the glow.
+// Higgsfield render in public/assets/pylon-<name>.jpg, framed by red edges in
+// the SEELE style. The face stays hidden until its texture loads, so a missing
+// file keeps the plain edge frame, and the face brightens with the edges
+// during the glow.
 import * as THREE from 'three';
 import { Text } from 'troika-three-text';
 import { getObelisk as roomGetObelisk } from './room.js';
 import { PYLONS, pylonFor, shouldFire, diffCounts } from '../pylon-map.js';
 import { createPool } from '../projectile.js';
+import { MONOLITH_RED } from '../colors.js';
 
 export const PYLON_RADIUS = 5; // legacy; placement now comes from PLACE
 export const PYLON_HEIGHT = 3;
 export const PYLON_WIDTH = 0.6;
 export const GLOW_MS = 2000;
-const BASE_COLOR = new THREE.Color(0x546e7a); // slate, the idle state color
+const BASE_COLOR = new THREE.Color(MONOLITH_RED); // the SEELE red edges
 const GLOW_COLOR = new THREE.Color(0xffffff);
 const FACE_IDLE = new THREE.Color(0.75, 0.75, 0.75); // the face texture, a little dimmed
 const FACE_GLOW = new THREE.Color(2.6, 1.8, 1.8); // over 1, so the dark stone and red emblem flare
-const FACE_INSET = 0.98; // inside the wireframe, so its edges never z-fight the face
+const FACE_INSET = 0.98; // inside the edge frame, so its edges never z-fight the face
+const BOX_EDGES = new THREE.EdgesGeometry(new THREE.BoxGeometry(PYLON_WIDTH, PYLON_HEIGHT, PYLON_WIDTH));
 const STARTS_KEPT = 256; // remembered `start` args; a lost `complete` never leaks past this
 
 /**
@@ -73,10 +76,8 @@ function makeLabel(text, fontSize, y, anchorY) {
 function makePylon(name, load) {
   const g = new THREE.Group();
   g.name = `pylon:${name}`;
-  const box = new THREE.Mesh(
-    new THREE.BoxGeometry(PYLON_WIDTH, PYLON_HEIGHT, PYLON_WIDTH),
-    new THREE.MeshBasicMaterial({ wireframe: true, color: BASE_COLOR.getHex() }),
-  );
+  const box = new THREE.LineSegments(BOX_EDGES, new THREE.LineBasicMaterial({ color: BASE_COLOR.getHex() }));
+  box.raycast = () => {}; // nothing picks a pylon
   box.position.y = PYLON_HEIGHT / 2;
   box.userData = { kind: 'pylon', pylon: name };
   g.add(box);

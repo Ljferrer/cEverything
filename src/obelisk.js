@@ -1,4 +1,4 @@
-// One session = one obelisk (PIN-1): a wireframe base box, a title label, and
+// One session = one obelisk (PIN-1): a stone base in its state color, a title label, and
 // a vertical stack of message slabs, newest on top. The look is a homage to the
 // SEELE monoliths: a matte black body with red edges stands behind the stack,
 // and a red glyph ("Ψ 03") over a red "SOUND ONLY" line tops it. Each frame `update(camera)`
@@ -63,6 +63,27 @@ function outlineMaterial(role) {
   return outlineMaterials.get(role);
 }
 const PANEL_GEOMETRY = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0);
+
+// The far-band bar: one shared plane, one solid material per role.
+const BAR_GEOMETRY = new THREE.PlaneGeometry(SLAB_WIDTH, BAR_HEIGHT).translate(0, BAR_HEIGHT / 2, 0);
+const barMaterials = new Map();
+function barMaterial(role) {
+  if (!barMaterials.has(role)) barMaterials.set(role, new THREE.MeshBasicMaterial({ color: colorFor(role) }));
+  return barMaterials.get(role);
+}
+
+// The base: a shared stone box whose vertex colors darken the sides and light
+// the top, times the obelisk's own material color (its state color, which
+// state.js sets and pulses), with the shared red edges of the body.
+const BASE_GEOMETRY = new THREE.BoxGeometry(BASE_SIZE, BASE_HEIGHT, BASE_SIZE);
+BASE_GEOMETRY.setAttribute(
+  'color',
+  new THREE.Float32BufferAttribute(
+    Array.from({ length: 24 }, (_, v) => (Math.floor(v / 4) === 2 ? [0.7, 0.7, 0.7] : [0.18, 0.18, 0.18])).flat(),
+    3,
+  ),
+); // BoxGeometry faces: +x, -x, +y (top), -y, +z, -z, four vertices each
+const BASE_EDGES = new THREE.EdgesGeometry(BASE_GEOMETRY);
 const PANEL_MATERIAL = new THREE.MeshBasicMaterial({ color: PANEL_COLOR });
 
 const SYMBOLS = ['Δ', 'Θ', 'Λ', 'Ξ', 'Π', 'Σ', 'Φ', 'Ψ', 'Ω', 'Γ'];
@@ -114,12 +135,12 @@ export class Obelisk extends THREE.Group {
     this.slabs = [];
     this.toolCount = 0;
 
-    this.base = new THREE.Mesh(
-      new THREE.BoxGeometry(BASE_SIZE, BASE_HEIGHT, BASE_SIZE),
-      new THREE.MeshBasicMaterial({ wireframe: true, color: stateColor(session.status) }),
-    );
+    this.base = new THREE.Mesh(BASE_GEOMETRY, new THREE.MeshBasicMaterial({ vertexColors: true, color: stateColor(session.status) }));
     this.base.position.y = BASE_HEIGHT / 2;
     this.base.userData = { sid: session.sid, kind: 'base' };
+    const baseEdges = new THREE.LineSegments(BASE_EDGES, EDGE_MATERIAL);
+    baseEdges.raycast = noPick;
+    this.base.add(baseEdges);
     this.add(this.base);
 
     // The title rides on top of the stack (set in #layoutStack), where it stays
@@ -218,11 +239,7 @@ export class Obelisk extends THREE.Group {
       slab.add(slab.panel);
     }
 
-    slab.bar = new THREE.Mesh(
-      new THREE.PlaneGeometry(SLAB_WIDTH, BAR_HEIGHT),
-      new THREE.MeshBasicMaterial({ wireframe: true, color: colorFor(role) }),
-    );
-    slab.bar.position.y = BAR_HEIGHT / 2;
+    slab.bar = new THREE.Mesh(BAR_GEOMETRY, barMaterial(role));
     slab.bar.visible = false;
     slab.bar.userData = { sid: this.sid, slabId: id };
     slab.add(slab.bar);
@@ -279,8 +296,7 @@ export class Obelisk extends THREE.Group {
     this.title.dispose();
     this.glyph.dispose();
     this.sound.dispose(); // the body's geometry and materials are shared, so they stay
-    this.base.geometry.dispose();
-    this.base.material.dispose();
+    this.base.material.dispose(); // the base geometry and edges are shared
     this.beacon.geometry.dispose();
     this.beacon.material.dispose();
   }
@@ -346,10 +362,8 @@ export class Obelisk extends THREE.Group {
   }
 
   #drop(slab) {
-    this.stack.remove(slab); // the outline and panel share their geometry and materials
+    this.stack.remove(slab); // the outline, panel, and bar share their geometry and materials
     slab.text.dispose();
-    slab.bar.geometry.dispose();
-    slab.bar.material.dispose();
   }
 }
 

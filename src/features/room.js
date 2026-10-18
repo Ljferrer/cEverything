@@ -48,7 +48,11 @@ export function install({ scene, bus }) {
   room = new THREE.Group();
   room.name = 'room';
   slots = loadSlots();
-  room.add(new THREE.GridHelper(12, 24, 0x335566, 0x1b2a33));
+  // A faint red grid over the floor texture, in the SEELE red.
+  const grid = new THREE.GridHelper(12, 24, 0x5a0e08, 0x2a0604);
+  grid.material.transparent = true;
+  grid.material.opacity = 0.4;
+  room.add(grid);
   scene.add(room);
 
   // While timeline.js holds the room scrubbed back (`bus.scrubbed`), only its re-emitted (`replayed`) frames apply.
