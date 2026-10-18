@@ -35,7 +35,9 @@ export const timeOf = (entry) => entry.key ?? entry.frame?.ts ?? entry.at;
  * backfills history chat by chat, so arrival order plays one chat at a time;
  * this order interleaves every chat by wall time, so simultaneous work plays
  * together. Each entry gets a `key` (ms): a slab's own `ts`; a session just
- * before its first slab; any other frame (delta, state, tool) the key of the
+ * before the first slab of its chat or of any subagent under it (the relay
+ * trims a chat's oldest slabs, so a chat can look younger than its subagents,
+ * and a subagent must never arrive before its parent); any other frame (delta, state, tool) the key of the
  * frame before it from the same chat, so a tool start follows its tool slab;
  * the arrival time when a chat has no timed frame yet. Ties keep arrival order.
  */
@@ -45,11 +47,19 @@ export function ordered(log) {
     const { sid, ts } = e.frame ?? {};
     if (sid != null && typeof ts === 'number') first.set(sid, Math.min(first.get(sid) ?? Infinity, ts));
   }
+  // Lift each chat's earliest time up its parent chain, so a parent sorts before every subagent under it.
+  const parentOf = new Map();
+  for (const e of log) if (e.type === 'session' && e.frame?.parent) parentOf.set(e.frame.sid, e.frame.parent);
+  const treeFirst = new Map(first);
+  for (const [sid, t] of first) {
+    let p = parentOf.get(sid);
+    for (let i = 0; p != null && i < 16; i++, p = parentOf.get(p)) if (!(treeFirst.get(p) <= t)) treeFirst.set(p, t);
+  }
   const last = new Map(); // sid -> key of its latest frame so far, in arrival order
   log.forEach((e, i) => {
     const { sid, ts } = e.frame ?? {};
     if (typeof ts === 'number') e.key = ts;
-    else if (e.type === 'session') e.key = first.has(sid) ? first.get(sid) - 1e-3 : e.at;
+    else if (e.type === 'session') e.key = treeFirst.has(sid) ? treeFirst.get(sid) - 1e-3 : e.at; // ties keep arrival order: parent first
     else e.key = last.get(sid) ?? first.get(sid) ?? e.at;
     e.seq = i;
     if (sid != null) last.set(sid, e.key);

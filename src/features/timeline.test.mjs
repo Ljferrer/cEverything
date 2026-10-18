@@ -283,6 +283,18 @@ test('a Play step onto a backfilled tool slab emits its tool start after the sla
   assert.equal(seen.filter((s) => s.type === 'tool').length, 0, 'a rebuild emits no tool starts');
 });
 
+test('a chat replays before its subagents even when the relay kept only its newer slabs', () => {
+  const bus = fakeBus();
+  let clock = 1_000_000;
+  const tl = createTimeline(bus, { now: () => clock++ });
+  const kid = { ...session('k'), kind: 'agent', parent: 'p' };
+  const grandkid = { ...session('g'), kind: 'agent', parent: 'k' };
+  // The parent's oldest slabs were trimmed: its first kept slab is newer than all of its subagents' work.
+  for (const f of [session('p'), slab('p', 'p9', 'late', 900), kid, slab('k', 'k1', 'early', 100), grandkid, slab('g', 'g1', 'earlier', 50)]) bus.emit(f.t, f);
+  const order = tl.log.map((e) => (e.type === 'session' ? `session:${e.frame.sid}` : e.frame.id));
+  assert.deepEqual(order, ['session:p', 'session:k', 'session:g', 'g1', 'k1', 'p9']);
+});
+
 test('play steps forward at the recorded pace until LIVE, and pause holds the frame', () => {
   const bus = fakeBus();
   const tl = createTimeline(bus);
