@@ -31,6 +31,7 @@ export function install() {
   style.textContent = `
     #headset-help-btn { position: fixed; top: 52px; right: 12px; z-index: 999; cursor: pointer; font: 700 12px/1 system-ui, sans-serif;
       letter-spacing: .08em; color: #ff6a5a; background: rgba(0,0,0,.75); border: 1px solid #5a1a14; border-radius: 6px; padding: 8px 10px; }
+    @media (width < 600px) { #headset-help-btn { top: 172px; } } /* below the phone QR panel */
     #headset-help { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.6); }
     #headset-help[hidden] { display: none; }
     #headset-help .card { max-width: 520px; width: calc(100vw - 32px); max-height: 85vh; overflow: auto; padding: 16px 18px;

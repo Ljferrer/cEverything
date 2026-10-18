@@ -84,6 +84,7 @@ export async function install({ camera, renderer, bus, net }) {
 
   // Orbit camera; OrbitControls handles touch (one finger rotates, two pan and zoom).
   const controls = new OrbitControls(camera, renderer.domElement);
+  bus.orbit = controls; // phone-camera.js turns orbiting off while the phone itself aims the camera
   controls.target.set(...LAPTOP_TARGET);
   controls.enableDamping = true;
   controls.maxPolarAngle = Math.PI * 0.49;
@@ -161,7 +162,7 @@ export async function install({ camera, renderer, bus, net }) {
       camera.position.add(move);
       controls.target.add(move);
     }
-    controls.update();
+    if (!bus.cameraOverride) controls.update();
   });
 
   // Click or tap to select: a pointer that moved under 6 px between down and up.
