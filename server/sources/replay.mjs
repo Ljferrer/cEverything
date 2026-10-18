@@ -5,7 +5,10 @@
 // `{ts, frame}`. Pacing: 10 ms per frame with `--fast`; otherwise a `{ts,
 // frame}` line sleeps the delta from the previous such line's `ts`, a bare line
 // sleeps the delta between successive `slab` `ts` values, both clamped to 5 s,
-// or 300 ms when the frame carries no `ts`. Read-only: no `sendCommand`.
+// or 300 ms when the frame carries no `ts`. `--speed <x>` (or
+// `OBELISKS_REPLAY_SPEED`) divides every non-fast gap by x; `--fast` wins.
+// `--loop` plays the file again from the top without re-sending a `session`
+// frame for a sid already sent. Read-only: no `sendCommand`.
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,6 +34,17 @@ export function fileFrom(argv, env) {
   return DEFAULT_FILE;
 }
 
+/** `--speed <x>` / `--speed=<x>`, else `env.OBELISKS_REPLAY_SPEED`; a value that is not a positive number logs and yields 1. */
+export function speedFrom(argv, env, log = () => {}) {
+  const i = argv.indexOf('--speed');
+  const raw = i >= 0 ? argv[i + 1] ?? '' : argv.find((a) => a.startsWith('--speed='))?.slice(8) ?? env.OBELISKS_REPLAY_SPEED;
+  if (raw === undefined) return 1;
+  const speed = Number(raw);
+  if (Number.isFinite(speed) && speed > 0) return speed;
+  log(`ignored replay speed ${JSON.stringify(raw)}, using 1`);
+  return 1;
+}
+
 const tsOf = (v) => (typeof v === 'number' ? v : typeof v === 'string' ? Date.parse(v) : NaN);
 const clamp = (ms) => Math.min(MAX_GAP_MS, Math.max(0, ms));
 
@@ -48,12 +62,11 @@ export function parseRecording(text) {
   return out;
 }
 
-/** The sleep before each entry, per PIN-32. */
-export function gaps(entries, fast) {
+/** The sleep before each entry, per PIN-32, divided by `speed` unless `fast`. */
+export function gaps(entries, fast, speed = 1) {
   let prevLine = NaN;
   let prevSlab = NaN;
-  return entries.map(({ frame, lineTs }) => {
-    if (fast) return FAST_GAP_MS;
+  const paced = entries.map(({ frame, lineTs }) => {
     if (!Number.isNaN(lineTs)) {
       const gap = Number.isNaN(prevLine) ? 0 : clamp(lineTs - prevLine);
       prevLine = lineTs;
@@ -67,6 +80,7 @@ export function gaps(entries, fast) {
     }
     return DEFAULT_GAP_MS;
   });
+  return fast ? paced.map(() => FAST_GAP_MS) : paced.map((ms) => ms / speed);
 }
 
 function remember(frame) {
@@ -95,12 +109,18 @@ export function stop() {
   timer = null;
 }
 
-/** Read the recording, emit the replay mode signal, and play the frames once in the background. */
-export async function start({ emit, argv = process.argv, env = process.env } = {}) {
+/** Read the recording, emit the replay mode signal, and play the frames in the background, once or with `--loop` forever. */
+export async function start({ emit, argv = process.argv, env = process.env, log = (...a) => console.error('[replay]', ...a) } = {}) {
   stop();
   const file = fileFrom(argv, env);
   const entries = parseRecording(await readFile(file, 'utf8'));
-  const delays = gaps(entries, argv.includes('--fast'));
+  const fast = argv.includes('--fast');
+  const loop = argv.includes('--loop');
+  const speed = speedFrom(argv, env, log);
+  log(fast ? `speed: --fast (${FAST_GAP_MS} ms per frame)` : `speed: ${speed}x`, loop ? 'looping' : 'once');
+  const delays = gaps(entries, fast, speed);
+  const sent = new Set();
+  let looped = false;
   titles.clear();
   slabs.clear();
   running = true;
@@ -110,8 +130,15 @@ export async function start({ emit, argv = process.argv, env = process.env } = {
     if (!running) return;
     const { frame } = entries[i];
     i += 1;
-    remember(frame);
-    emit(frame);
+    if (!(looped && frame.t === 'session' && sent.has(frame.sid))) {
+      if (frame.t === 'session') sent.add(frame.sid);
+      remember(frame);
+      emit(frame);
+    }
+    if (i >= entries.length && loop) {
+      i = 0;
+      looped = true;
+    }
     if (i < entries.length) timer = setTimeout(tick, delays[i]);
     else stop();
   };
