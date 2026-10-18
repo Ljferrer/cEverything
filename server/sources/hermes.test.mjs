@@ -246,6 +246,27 @@ test('ES9 session.branch reaches the gateway and its reply attaches the sibling 
   assert.equal(frames.filter((f) => f.t === 'session').length, 2);
 });
 
+test('a v0.22.2 list entry ({id, session_key}) attaches by id and resumes by session_key; a refused resume still announces the session', async () => {
+  const g = await gateway({
+    sessions: [
+      { id: 'a1', session_key: '20261017_170415_a2330b', title: 'Live', status: 'working' },
+      { id: 'lazy', session_key: '20261017_170700_6ef76e', title: 'Lazy', status: 'idle' },
+    ],
+    onRequest(msg) {
+      if (msg.method === 'session.resume' && msg.params.session_id !== '20261017_170415_a2330b') {
+        return { error: { code: 4007, message: 'session not found' } };
+      }
+      return undefined;
+    },
+  });
+  const { frames } = await startAgainst(g);
+  assert.deepEqual(g.calls('session.resume').map((r) => r.params.session_id), ['20261017_170415_a2330b', '20261017_170700_6ef76e']);
+  const sessionFrames = frames.filter((f) => f.t === 'session');
+  assert.deepEqual(sessionFrames.map((f) => [f.sid, f.title, f.status]), [['a1', 'Live', 'working'], ['lazy', 'Lazy', 'idle']]);
+  assert.ok(sessionFrames.every(isServerEvent));
+  assert.ok(!frames.some((f) => f.t === 'state' && f.status === 'error'), 'a refused resume is not an error state');
+});
+
 test('ES12 sessions.changed re-lists and upserts; a known sid never re-emits a session frame', async () => {
   const g = await gateway({ sessions: [session('s1', 'idle'), session('s2', 'working')] });
   const { frames, until } = await startAgainst(g);
