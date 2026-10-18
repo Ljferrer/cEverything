@@ -230,7 +230,7 @@ export function install({ bus, net }) {
   const button = document.createElement('button');
   button.id = 'sound-button';
   button.type = 'button';
-  button.title = 'Sound (M)';
+  button.title = 'Sound effects (M)';
   Object.assign(button.style, {
     position: 'fixed',
     top: '52px',
@@ -247,6 +247,7 @@ export function install({ bus, net }) {
   const setMuted = (next) => {
     muted = next;
     button.textContent = muted ? '🔇' : '🔊';
+    button.setAttribute('aria-label', muted ? 'Unmute sound effects' : 'Mute sound effects');
     button.setAttribute('aria-pressed', String(muted));
     try {
       localStorage.setItem(MUTE_KEY, muted ? '1' : '0');
