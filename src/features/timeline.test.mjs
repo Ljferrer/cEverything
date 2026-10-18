@@ -175,6 +175,9 @@ test('pylons.js fires no projectile for a replayed start and ignores live tools 
   bus.scrubbed = false;
   bus.emit('tool', tool('a', 't3'));
   assert.equal(flying(), 1, 'a live start fires once the timeline is live');
+  let traced = 0;
+  scene.getObjectByName('pylons').traverse((o) => (traced += o.isLine && !o.isLineSegments && o.visible ? 1 : 0));
+  assert.equal(traced, 1, 'the fired start leaves a tracer from the tool call to its pylon');
   bus.scrubbed = true;
   bus.emit('tool', { ...tool('a', 't4'), replayed: true, playback: true });
   assert.equal(flying(), 2, 'a start stepped through on Play fires like live');
