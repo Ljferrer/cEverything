@@ -1,5 +1,6 @@
 // Pylons and projectiles (plan 4, PIN-2): four tool monoliths stand far out
-// past the end of the hall, each as tall as a building; a `tool` start
+// past the end of the hall and rise past the camera's far plane, so no top ever
+// shows; a `tool` start
 // fires a pooled sphere from the
 // calling slab (or the obelisk base) to the tool's pylon, leaves a tracer line
 // along its arc, and lights the pylon for 2 s (PIN-52, PIN-53, PIN-55); a filesystem `complete` writes the file's
@@ -17,10 +18,11 @@ import { Text } from 'troika-three-text';
 import { getObelisk as roomGetObelisk } from './room.js';
 import { PYLONS, pylonFor, shouldFire, diffCounts } from '../pylon-map.js';
 import { createPool, createTracers } from '../projectile.js';
-import { MONOLITH_RED } from '../colors.js';
+import { MONOLITH_RED, MONOLITH_BLACK } from '../colors.js';
 
 export const PYLON_RADIUS = 5; // legacy; placement now comes from PLACE
-export const PYLON_HEIGHT = 15;
+export const PYLON_HEIGHT = 15; // the textured face at the foot, where labels sit and tool calls land
+export const PYLON_RISE = 2000; // the column: far past the camera's far plane, so it never ends in view
 export const PYLON_WIDTH = 3.2;
 export const PYLON_DEPTH = 0.7; // a flat monolith, broad face toward the aisle
 export const GLOW_MS = 2000;
@@ -29,7 +31,9 @@ const GLOW_COLOR = new THREE.Color(0xffffff);
 const FACE_IDLE = new THREE.Color(0.75, 0.75, 0.75); // the face texture, a little dimmed
 const FACE_GLOW = new THREE.Color(2.6, 1.8, 1.8); // over 1, so the dark stone and red emblem flare
 const FACE_INSET = 0.98; // inside the edge frame, so its edges never z-fight the face
-const BOX_EDGES = new THREE.EdgesGeometry(new THREE.BoxGeometry(PYLON_WIDTH, PYLON_HEIGHT, PYLON_DEPTH));
+const BOX_EDGES = new THREE.EdgesGeometry(new THREE.BoxGeometry(PYLON_WIDTH, PYLON_RISE, PYLON_DEPTH));
+const BODY_INSET = 0.96; // the black column sits inside the face and the edge frame
+const BODY_GEOMETRY = new THREE.BoxGeometry(PYLON_WIDTH * BODY_INSET, PYLON_RISE, PYLON_DEPTH * BODY_INSET);
 const STARTS_KEPT = 256; // remembered `start` args; a lost `complete` never leaks past this
 
 /**
@@ -79,9 +83,14 @@ function makePylon(name, load) {
   g.name = `pylon:${name}`;
   const box = new THREE.LineSegments(BOX_EDGES, new THREE.LineBasicMaterial({ color: BASE_COLOR.getHex() }));
   box.raycast = () => {}; // nothing picks a pylon
-  box.position.y = PYLON_HEIGHT / 2;
+  box.position.y = PYLON_RISE / 2;
   box.userData = { kind: 'pylon', pylon: name };
   g.add(box);
+  const body = new THREE.Mesh(BODY_GEOMETRY, new THREE.MeshBasicMaterial({ color: MONOLITH_BLACK }));
+  body.name = `pylon:${name}:body`;
+  body.raycast = () => {};
+  body.position.y = PYLON_RISE / 2;
+  g.add(body);
   const face = new THREE.Mesh(
     new THREE.BoxGeometry(PYLON_WIDTH * FACE_INSET, PYLON_HEIGHT * FACE_INSET, PYLON_DEPTH * FACE_INSET),
     new THREE.MeshBasicMaterial({ color: FACE_IDLE }),
@@ -162,7 +171,7 @@ export function install({ scene, bus, getObelisk = roomGetObelisk, load = loadTe
       const slab = obelisk.slabs?.find((s) => s.slabId === frame.id);
       const launch = slab && slab.visible ? slab : baseOf(obelisk);
       launch.getWorldPosition(_from);
-      pylons[pylon].box.getWorldPosition(_to);
+      pylons[pylon].face.getWorldPosition(_to); // the face center, not the endless column's
       pool.fire(_from, _to, now);
       tracers.trace(_from, _to, now);
       pylons[pylon].glowUntil = now + GLOW_MS; // a repeat restarts the timer
