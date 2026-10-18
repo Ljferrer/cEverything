@@ -8,6 +8,9 @@
 // pylons.js ignore them. LIVE re-renders up to the newest frame and resumes.
 // Play moves forward from the scrubbed frame at the recorded pace (each gap
 // capped at MAX_PLAY_GAP_MS) and goes live at the newest frame; Pause holds.
+// The relay backfills history as slabs with no `tool` frames, so a Play step
+// onto a tool slab with no logged start emits one (`toolStartFor`): the
+// pylons fire and the tool sounds play for history too.
 // Installs only where laptop.js installs (`shouldInstallLaptop`).
 import { shouldInstallLaptop } from '../input.js';
 
@@ -21,6 +24,16 @@ export const FRAME_TYPES = Object.freeze(['session', 'slab', 'delta', 'state', '
 export const timeOf = (entry) => entry.frame?.ts ?? entry.at;
 
 /**
+ * The `tool` start a tool slab stands for: both sources write a tool slab as
+ * `<name> <args>` under the tool call id. Null for any other frame.
+ */
+export function toolStartFor(frame) {
+  if (frame?.t !== 'slab' || frame.role !== 'tool' || typeof frame.text !== 'string') return null;
+  const name = frame.text.split(/\s/, 1)[0];
+  return name ? { t: 'tool', sid: frame.sid, id: frame.id, name, phase: 'start' } : null;
+}
+
+/**
  * The timeline core, DOM free. Records each `FRAME_TYPES` bus event that is not
  * itself `replayed` as `{type, frame, at}`. `scrubTo(k)` shows frame k (the
  * newest frame means live); `advance()` shows the next frame without a
@@ -29,9 +42,12 @@ export const timeOf = (entry) => entry.frame?.ts ?? entry.at;
  */
 export function createTimeline(bus, { reset = () => {}, now = Date.now } = {}) {
   const log = [];
+  const started = new Set(); // ids of the tool starts in the log
   let shownAt = null; // index of the frame shown while scrubbed back, else null (live)
   const record = (e) => {
-    if (!e.detail?.replayed) log.push({ type: e.type, frame: e.detail, at: now() });
+    if (e.detail?.replayed) return;
+    log.push({ type: e.type, frame: e.detail, at: now() });
+    if (e.type === 'tool' && e.detail?.phase === 'start') started.add(e.detail.id);
   };
   for (const type of FRAME_TYPES) bus.addEventListener(type, record);
 
@@ -64,7 +80,10 @@ export function createTimeline(bus, { reset = () => {}, now = Date.now } = {}) {
       shownAt += 1;
       // Playback steps one frame at a time, so it animates and sounds like live (`playback`);
       // a rebuild (scrub, LIVE) re-emits frames in bulk and stays silent.
-      bus.emit(log[shownAt].type, { ...log[shownAt].frame, replayed: true, playback: true });
+      const { type, frame } = log[shownAt];
+      bus.emit(type, { ...frame, replayed: true, playback: true });
+      const start = toolStartFor(frame);
+      if (start && !started.has(start.id)) bus.emit('tool', { ...start, replayed: true, playback: true });
     },
     goLive() {
       if (shownAt === null) return;
@@ -79,9 +98,16 @@ export function createTimeline(bus, { reset = () => {}, now = Date.now } = {}) {
   return timeline;
 }
 
-/** The playback wait after frame k: the arrival gap to frame k + 1, between 0 and MAX_PLAY_GAP_MS. */
+/**
+ * The playback wait after frame k, between 0 and MAX_PLAY_GAP_MS: the `ts` gap
+ * to frame k + 1 when both carry one, else the arrival gap. The relay backfill
+ * lands all history at once, so only `ts` keeps its pace.
+ */
 export function playGap(log, k) {
-  const gap = (log[k + 1]?.at ?? 0) - (log[k]?.at ?? 0);
+  const a = log[k];
+  const b = log[k + 1];
+  const both = a?.frame?.ts != null && b?.frame?.ts != null;
+  const gap = both ? b.frame.ts - a.frame.ts : (b?.at ?? 0) - (a?.at ?? 0);
   return Math.max(0, Math.min(MAX_PLAY_GAP_MS, gap));
 }
 
