@@ -14,7 +14,7 @@
 // land on the body and fork the session.
 import * as THREE from 'three';
 import { Text } from 'troika-three-text';
-import { lod, midSummary } from './lod.js';
+import { lod, midSummary, coneScale } from './lod.js';
 import { colorFor, stateColor, MONOLITH_BLACK, MONOLITH_RED } from './colors.js';
 import { BAR_HEIGHT, slabHeight, stackLayout } from './stack.js';
 
@@ -59,6 +59,8 @@ function textHeight(t, fallback) {
 const _slabPos = new THREE.Vector3();
 const _camPos = new THREE.Vector3();
 const _selfPos = new THREE.Vector3();
+const _fwd = new THREE.Vector3();
+const _toSelf = new THREE.Vector3();
 
 function makeText(text, fontSize, color, onSync) {
   const t = new Text();
@@ -215,10 +217,18 @@ export class Obelisk extends THREE.Group {
     // room center sees the same facing room.js's lookAt(0, 0, 0) gave.
     this.getWorldPosition(_selfPos);
     this.rotation.set(0, Math.atan2(_camPos.x - _selfPos.x, _camPos.z - _selfPos.z), 0);
+    // Forward cone: one scale for the whole obelisk from the horizontal angle
+    // between the viewer's facing and this obelisk (see coneScale in lod.js).
+    camera.getWorldDirection(_fwd);
+    _fwd.y = 0;
+    _toSelf.subVectors(_selfPos, _camPos);
+    _toSelf.y = 0;
+    const flat = camera.isCamera && _fwd.lengthSq() > 1e-6 && _toSelf.lengthSq() > 1e-6;
+    const scale = flat ? coneScale(_fwd.normalize().dot(_toSelf.normalize())) : 1;
     for (const slab of this.slabs) {
       if (!slab.visible) continue;
       slab.getWorldPosition(_slabPos);
-      const band = lod(_slabPos.distanceTo(_camPos), slab.full.length, slab.band);
+      const band = lod(_slabPos.distanceTo(_camPos) * scale, slab.full.length, slab.band);
       if (band !== slab.band) this.#apply(slab, band);
     }
   }

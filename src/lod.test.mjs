@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { lod, midSummary, NEAR, FAR, HYSTERESIS, SHORT } from './lod.js';
+import { coneScale, CONE_IN_SCALE, CONE_OUT_SCALE, BEHIND_SCALE } from './lod.js';
 
 const LONG = 200; // a text at or past the short-text cutoff keeps the plain distance bands
 
@@ -51,4 +52,18 @@ test('midSummary is the first 80 characters plus the tool count', () => {
   const text = 'a'.repeat(100);
   assert.equal(midSummary(text, 2), 'a'.repeat(80) + ' · 2 tools');
   assert.equal(midSummary('short', 0), 'short · 0 tools');
+});
+
+test('coneScale: detail reaches further in front, collapses sooner to the side and behind', () => {
+  const deg = (d) => Math.cos((d * Math.PI) / 180);
+  assert.equal(coneScale(deg(0)), CONE_IN_SCALE);
+  assert.equal(coneScale(deg(25)), CONE_IN_SCALE);
+  const mid = coneScale(deg(45));
+  assert.ok(mid > CONE_IN_SCALE && mid < CONE_OUT_SCALE, `45 deg scale ${mid}`);
+  assert.equal(coneScale(deg(75)), CONE_OUT_SCALE);
+  assert.equal(coneScale(deg(150)), BEHIND_SCALE);
+  assert.equal(coneScale(NaN), 1);
+  // In front, a slab 2 m away still reads in full; to the side it is a summary.
+  assert.equal(lod(2 * coneScale(deg(0)), 200), 'near');
+  assert.equal(lod(2 * coneScale(deg(75)), 200), 'mid');
 });

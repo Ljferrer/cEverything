@@ -258,3 +258,19 @@ test('a ray through the body between slabs is not a pick', () => {
   const into = new THREE.Raycaster(new THREE.Vector3(0, BASE_HEIGHT / 2, 2), new THREE.Vector3(0, 0, -1));
   assert.equal(into.intersectObject(o, true)[0]?.object, o.base, 'the base still takes a pick in front of the body');
 });
+
+test('the forward cone: a real camera facing an obelisk reads it in full, facing away collapses it', () => {
+  const o = new Obelisk({ sid: 'cone', title: 'T', status: 'idle' });
+  o.addSlab({ id: 'c1', role: 'assistant', text: 'x'.repeat(200) });
+  o.updateMatrixWorld(true);
+  const cam = new THREE.PerspectiveCamera();
+  cam.position.set(0, STACK_BOTTOM, 2);
+  cam.lookAt(0, STACK_BOTTOM, 0); // facing the obelisk, 2 m away
+  cam.updateMatrixWorld(true);
+  o.update(cam);
+  assert.equal(o.slabs[0].band, 'near');
+  cam.lookAt(0, STACK_BOTTOM, 10); // turned around, same spot
+  cam.updateMatrixWorld(true);
+  o.update(cam);
+  assert.equal(o.slabs[0].band, 'far');
+});
