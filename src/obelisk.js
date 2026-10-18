@@ -8,10 +8,16 @@
 // and every band change with unchanged text re-runs it at once.
 // `setState`, `setBeacon`, and `slabMesh` are the later plans' seams.
 //
+// Each slab is a card: a thin outline in its role color frames the text. User cards get larger bold text,
+// a full-strength outline, and a dark panel; thinking and tool cards are
+// smaller and dimmer. A text card is its measured text plus CARD_PAD above and
+// below, so SLAB_GAP stays open between outlines. The far band hides the outline and panel, since the bar
+// already reads as one card and the room has many far slabs.
+//
 // Pick targets (PIN-22): every slab mesh carries userData {sid, slabId} and the
-// base carries userData {sid, kind:'base'}. The body, its edges, the glyph, and
-// the SOUND ONLY line never take a pick: a ray that misses a slab must not
-// land on the body and fork the session.
+// base carries userData {sid, kind:'base'}. The body, its edges, the glyph,
+// the SOUND ONLY line, and each card's outline and panel never take a pick: a
+// ray that misses a slab must not land on the body and fork the session.
 import * as THREE from 'three';
 import { Text } from 'troika-three-text';
 import { lod, midSummary, coneScale } from './lod.js';
@@ -31,6 +37,10 @@ export const GLYPH_SIZE = 0.2;
 export const SOUND_SIZE = 0.045;
 export const MIN_BODY_TOP = 1.8; // a short stack still stands as a tall monolith
 const BODY_GAP = 0.02; // the body's front face sits this far behind the slab text
+export const CARD_PAD = 0.012; // the outline sits this far above and below the slab text
+export const ROLE_FONT = Object.freeze({ user: 0.06, assistant: 0.04, thinking: 0.034, tool: 0.034 });
+const DIM_ROLES = new Set(['thinking', 'tool']);
+const PANEL_COLOR = 0x0a1a26; // a dark blue-black behind user text
 
 // Shared by every obelisk: the body is a unit box scaled to the stack height.
 const BODY_GEOMETRY = new THREE.BoxGeometry(1, 1, 1);
@@ -38,6 +48,22 @@ export const BODY_MATERIAL = new THREE.MeshBasicMaterial({ color: MONOLITH_BLACK
 const EDGE_GEOMETRY = new THREE.EdgesGeometry(BODY_GEOMETRY);
 const EDGE_MATERIAL = new THREE.LineBasicMaterial({ color: MONOLITH_RED });
 const noPick = () => {};
+
+// Shared by every card: a unit rectangle (x -0.5..0.5, y 0..1) scaled to the
+// slab, one outline material per role, and one panel for user cards.
+const OUTLINE_GEOMETRY = new THREE.BufferGeometry().setFromPoints(
+  [[-0.5, 0], [0.5, 0], [0.5, 0], [0.5, 1], [0.5, 1], [-0.5, 1], [-0.5, 1], [-0.5, 0]].map(([x, y]) => new THREE.Vector3(x, y, 0)),
+);
+const outlineMaterials = new Map();
+function outlineMaterial(role) {
+  if (!outlineMaterials.has(role)) {
+    const strong = role === 'user';
+    outlineMaterials.set(role, new THREE.LineBasicMaterial({ color: colorFor(role), transparent: !strong, opacity: strong ? 1 : 0.45 }));
+  }
+  return outlineMaterials.get(role);
+}
+const PANEL_GEOMETRY = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0);
+const PANEL_MATERIAL = new THREE.MeshBasicMaterial({ color: PANEL_COLOR });
 
 const SYMBOLS = ['Δ', 'Θ', 'Λ', 'Ξ', 'Π', 'Σ', 'Φ', 'Ψ', 'Ω', 'Γ'];
 const numbers = new Map(); // sid -> creation-order number, so a rebuilt obelisk keeps its glyph
@@ -174,9 +200,22 @@ export class Obelisk extends THREE.Group {
     slab.band = null;
     slab.userData = { sid: this.sid, slabId: id };
 
-    slab.text = makeText(text, 0.04, colorFor(role), () => this.#layoutStack());
+    const color = DIM_ROLES.has(role) ? new THREE.Color(colorFor(role)).multiplyScalar(0.7).getHex() : colorFor(role);
+    slab.text = makeText(text, ROLE_FONT[role] ?? ROLE_FONT.assistant, color, () => this.#layoutStack());
+    if (role === 'user') slab.text.fontWeight = 'bold';
+    slab.text.position.y = CARD_PAD;
     slab.text.userData = { sid: this.sid, slabId: id };
     slab.add(slab.text);
+
+    slab.outline = new THREE.LineSegments(OUTLINE_GEOMETRY, outlineMaterial(role));
+    slab.outline.raycast = noPick;
+    slab.add(slab.outline);
+    if (role === 'user') {
+      slab.panel = new THREE.Mesh(PANEL_GEOMETRY, PANEL_MATERIAL);
+      slab.panel.position.z = -0.004; // behind the text, in front of the body
+      slab.panel.raycast = noPick;
+      slab.add(slab.panel);
+    }
 
     slab.bar = new THREE.Mesh(
       new THREE.PlaneGeometry(SLAB_WIDTH, BAR_HEIGHT),
@@ -252,6 +291,8 @@ export class Obelisk extends THREE.Group {
 
   #apply(slab, band) {
     slab.band = band;
+    slab.outline.visible = band !== 'far';
+    if (slab.panel) slab.panel.visible = band !== 'far';
     if (band === 'far') {
       slab.text.visible = false;
       slab.bar.visible = true;
@@ -279,12 +320,17 @@ export class Obelisk extends THREE.Group {
     while (this.slabs.length > MAX_KEPT) this.#drop(this.slabs.shift());
     const firstVisible = Math.max(0, this.slabs.length - MAX_VISIBLE);
     const shown = this.slabs.slice(firstVisible);
-    const { offsets, height } = stackLayout(
-      shown.map((slab) => slabHeight({ band: slab.band, textRenderInfo: slab.text.textRenderInfo })),
+    const heights = shown.map(
+      (slab) => slabHeight({ band: slab.band, textRenderInfo: slab.text.textRenderInfo }) + (slab.band === 'far' ? 0 : 2 * CARD_PAD),
     );
+    const { offsets, height } = stackLayout(heights);
     this.slabs.forEach((slab, i) => {
       slab.visible = i >= firstVisible;
-      if (slab.visible) slab.position.y = offsets[i - firstVisible];
+      if (!slab.visible) return;
+      const h = heights[i - firstVisible];
+      slab.position.y = offsets[i - firstVisible];
+      slab.outline.scale.set(SLAB_WIDTH + 2 * CARD_PAD, h, 1);
+      slab.panel?.scale.copy(slab.outline.scale);
     });
     this.title.position.y = STACK_BOTTOM + height + 0.04;
     const soundH = textHeight(this.sound, SOUND_SIZE * 1.2);
@@ -299,7 +345,7 @@ export class Obelisk extends THREE.Group {
   }
 
   #drop(slab) {
-    this.stack.remove(slab);
+    this.stack.remove(slab); // the outline and panel share their geometry and materials
     slab.text.dispose();
     slab.bar.geometry.dispose();
     slab.bar.material.dispose();

@@ -28,9 +28,9 @@ registerHooks({
 });
 
 const { Text } = await import('troika-three-text');
-const { Obelisk, STACK_BOTTOM, TITLE_SIZE, BASE_HEIGHT, MIN_BODY_TOP, glyphFor } = await import('./obelisk.js');
+const { Obelisk, STACK_BOTTOM, TITLE_SIZE, BASE_HEIGHT, MIN_BODY_TOP, CARD_PAD, glyphFor } = await import('./obelisk.js');
 const { BAR_HEIGHT, SLAB_GAP } = await import('./stack.js');
-const { stateColor, MONOLITH_BLACK } = await import('./colors.js');
+const { stateColor, MONOLITH_BLACK, ROLE_COLORS } = await import('./colors.js');
 
 // Oracle measurement, independent of stack.js: about 30 characters per
 // wrapped line at fontSize 0.04, 0.048 m per line, anchorY bottom.
@@ -53,10 +53,10 @@ function cameraAt(z) {
   return cam;
 }
 
-// The visible height of a slab as the viewer sees it: the bar when the text
-// is hidden, else the measured text span.
+// The visible top of a slab above its origin as the viewer sees it: the bar
+// when the text is hidden, else the text's offset plus its measured span.
 function shownHeight(slab) {
-  return slab.text.visible ? measure(slab.text.text) : BAR_HEIGHT;
+  return slab.text.visible ? slab.text.position.y + measure(slab.text.text) : BAR_HEIGHT;
 }
 
 function assertNoOverlap(obelisk) {
@@ -237,7 +237,7 @@ test('the body reaches from the base to above the glyph and grows with a tall st
   const text = 'a fourth slab that wraps onto two lines';
   o.addSlab({ id: 'a9', role: 'user', text });
   flushSyncs();
-  assert.ok(Math.abs(o.body.scale.y - before - (measure(text) + SLAB_GAP)) < 1e-9, 'the body grows by the new slab and its gap');
+  assert.ok(Math.abs(o.body.scale.y - before - (measure(text) + 2 * CARD_PAD + SLAB_GAP)) < 1e-9, 'the body grows by the new card and its gap');
 });
 
 test('setState still recolors the base, not the shared body', () => {
@@ -252,11 +252,94 @@ test('setState still recolors the base, not the shared body', () => {
 
 test('a ray through the body between slabs is not a pick', () => {
   const o = roomWith(SHORT);
-  const ray = new THREE.Raycaster(new THREE.Vector3(0.33, 0.5, 2), new THREE.Vector3(0, 0, -1));
+  const gapY = STACK_BOTTOM + o.slabs[1].position.y - SLAB_GAP / 2; // between the first two cards
+  const ray = new THREE.Raycaster(new THREE.Vector3(0.33, gapY, 2), new THREE.Vector3(0, 0, -1));
   const hits = ray.intersectObject(o, true).map((h) => h.object);
   assert.ok(hits.length === 0, `no hit, got ${hits.map((h) => h.type)}`);
   const into = new THREE.Raycaster(new THREE.Vector3(0, BASE_HEIGHT / 2, 2), new THREE.Vector3(0, 0, -1));
   assert.equal(into.intersectObject(o, true)[0]?.object, o.base, 'the base still takes a pick in front of the body');
+});
+
+function mixedRoom() {
+  const o = new Obelisk({ sid: 'cards', title: 'C', status: 'idle' });
+  ['user', 'assistant', 'thinking', 'tool', 'user'].forEach((role, i) => o.addSlab({ id: `c${i}`, role, text: `${role} message number ${i} that wraps` }));
+  flushSyncs();
+  o.updateMatrixWorld(true);
+  return o;
+}
+
+test('every slab gets exactly one outline in its role color, framing its measured text', () => {
+  const o = mixedRoom();
+  for (const slab of o.slabs) {
+    const lines = slab.children.filter((c) => c.isLineSegments);
+    assert.equal(lines.length, 1, `${slab.slabId} has one outline`);
+    assert.equal(lines[0], slab.outline);
+    assert.equal(slab.outline.material.color.getHex(), ROLE_COLORS[slab.role], `${slab.role} outline color`);
+    assert.ok(Math.abs(slab.outline.scale.y - (measure(slab.text.text) + 2 * CARD_PAD)) < 1e-9, `${slab.slabId} outline height`);
+  }
+  assert.equal(o.slabs[1].outline.geometry, o.slabs[2].outline.geometry, 'outlines share one geometry');
+  assert.equal(o.slabs[0].outline.material, o.slabs[4].outline.material, 'same role, same material');
+});
+
+test('cards leave a visible gap between their outlines and their text never overlaps', () => {
+  const o = mixedRoom();
+  assertNoOverlap(o);
+  for (let i = 0; i + 1 < o.slabs.length; i++) {
+    const [a, b] = [o.slabs[i], o.slabs[i + 1]];
+    const top = a.position.y + a.outline.position.y + a.outline.scale.y;
+    const bottom = b.position.y + b.outline.position.y;
+    assert.ok(a.text.position.y >= CARD_PAD && a.text.position.y + measure(a.text.text) <= a.outline.scale.y + 1e-9, `${a.slabId} text sits inside its outline`);
+    assert.ok(bottom - top > 0.01, `gap between ${a.slabId} and ${b.slabId} is ${(bottom - top).toFixed(3)}`);
+  }
+});
+
+test('user text is larger and bold on a dark panel; thinking and tool text is smaller than assistant', () => {
+  const o = mixedRoom();
+  const [user, assistant, thinking, tool] = o.slabs;
+  assert.ok(user.text.fontSize >= 1.4 * assistant.text.fontSize, `user ${user.text.fontSize} vs assistant ${assistant.text.fontSize}`);
+  assert.equal(user.text.fontWeight, 'bold');
+  assert.notEqual(assistant.text.fontWeight, 'bold');
+  assert.ok(thinking.text.fontSize < assistant.text.fontSize && tool.text.fontSize < assistant.text.fontSize);
+  assert.ok(user.panel?.isMesh, 'a user slab has a panel');
+  assert.deepEqual(user.panel.scale.toArray(), user.outline.scale.toArray(), 'the panel fills the outline');
+  assert.ok(user.panel.position.z < 0 && user.panel.position.z > -0.02, 'the panel sits behind the text, in front of the body');
+  assert.equal(assistant.panel, undefined);
+  assert.equal(user.outline.material.opacity, 1);
+  assert.ok(assistant.outline.material.opacity < 1, 'only the user outline is full strength');
+});
+
+test('the far band hides the outline and panel, and near shows them again', () => {
+  const o = mixedRoom();
+  o.update(cameraAt(6));
+  assert.ok(o.slabs.every((s) => s.band === 'far' && !s.outline.visible));
+  assert.equal(o.slabs[0].panel.visible, false);
+  o.updateMatrixWorld(true);
+  o.update(cameraAt(1));
+  flushSyncs();
+  assert.ok(o.slabs.every((s) => s.band === 'near' && s.outline.visible));
+  assert.equal(o.slabs[0].panel.visible, true);
+});
+
+test('slab picking userData is unchanged and a ray through a card never hits its outline or panel', () => {
+  const o = mixedRoom();
+  for (const slab of o.slabs) {
+    const want = { sid: 'cards', slabId: slab.slabId };
+    assert.deepEqual(slab.userData, want);
+    assert.deepEqual(slab.text.userData, want);
+    assert.deepEqual(slab.bar.userData, want);
+  }
+  const user = o.slabs[0];
+  const y = STACK_BOTTOM + user.position.y + 0.02; // inside the user card, on its bar's span
+  const hits = new THREE.Raycaster(new THREE.Vector3(0.2, y, 2), new THREE.Vector3(0, 0, -1)).intersectObject(o, true).map((h) => h.object);
+  assert.ok(hits.length > 0, 'the slab still takes a pick');
+  for (const hit of hits) {
+    assert.notEqual(hit, user.outline);
+    assert.notEqual(hit, user.panel);
+    assert.deepEqual(hit.userData, { sid: 'cards', slabId: user.slabId });
+  }
+  const edge = new THREE.Raycaster(new THREE.Vector3(-0.5 - CARD_PAD, y, 2), new THREE.Vector3(0, 0, -1));
+  edge.params.Line.threshold = 0.05;
+  assert.ok(edge.intersectObject(o, true).every((h) => h.object !== user.outline), 'a ray on the outline edge does not pick it');
 });
 
 test('the forward cone: a real camera facing an obelisk reads it in full, facing away collapses it', () => {
