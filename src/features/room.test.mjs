@@ -142,6 +142,19 @@ test('fewer chats in the relay list pack the slots in their old order, and each 
   ['r2', 'r4', 'r9', 'r15'].forEach((sid, i) => assert.ok(pos(sid).equals(before[i]), `${sid} stays put when a chat arrives`));
 });
 
+test('a slot map from before subagents sat oldest first keeps its chats and reseats its subagents', async () => {
+  store.clear();
+  store.set('obelisks.slots.v3', JSON.stringify({ root: { a: 0, b: 1 }, child: { k: { parent: 'a', slot: 7 } } }));
+  const { mod, session, pos } = await room();
+  session('b');
+  session('a');
+  session('k', 'a');
+  assert.deepEqual([pos('a').x, pos('a').z], [mod.rootSlotPoint(0).x, mod.rootSlotPoint(0).z], 'chats keep their stored slots');
+  const seat0 = mod.childSlotPoint(0, { x: pos('a').x, z: pos('a').z, ox: mod.rootSlotPoint(0).ox, oz: mod.rootSlotPoint(0).oz });
+  assert.ok(Math.abs(pos('k').x - seat0.x) < 1e-9 && Math.abs(pos('k').z - seat0.z) < 1e-9, 'the subagent takes the first seat, at the base');
+  assert.equal(JSON.parse(store.get('obelisks.slots.v3')).childOrder, 'started-v2');
+});
+
 test('a reload with a stored slot map restores every position', async () => {
   store.clear();
   const first = await room();

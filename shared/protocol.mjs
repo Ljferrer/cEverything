@@ -3,7 +3,8 @@
 //
 // server → client
 //   {t:'mode',    mode:'live'|'replay'|'synthetic', canEdit:boolean}
-//   {t:'session', sid, harness:'hermes'|'claude'|'codex'|'synthetic', kind:'chat'|'agent', title, status, parent, phase}
+//   {t:'session', sid, harness:'hermes'|'claude'|'codex'|'synthetic', kind:'chat'|'agent', title, status, parent, phase, started}
+//                 started (optional): when the session began, in ms, for replay order
 //   {t:'slab',    sid, id, role:'user'|'assistant'|'thinking'|'tool', text, ts}
 //   {t:'delta',   sid, id, role, text}
 //   {t:'tool',    sid, id, name, phase:'start'|'complete', args, summary, diff}
@@ -45,7 +46,7 @@ const SERVER_SHAPES = {
   mode: { req: { mode: oneOf(MODES), canEdit: bool }, opt: {} },
   session: {
     req: { sid: str, harness: oneOf(HARNESSES), kind: oneOf(KINDS), title: str, status: oneOf(STATUSES) },
-    opt: { parent: str, phase: str },
+    opt: { parent: str, phase: str, started: num },
   },
   slab: { req: { sid: str, id: str, role: oneOf(ROLES), text: str, ts: num }, opt: {} },
   delta: { req: { sid: str, id: str, role: oneOf(ROLES), text: str }, opt: {} },

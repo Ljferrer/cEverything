@@ -35,17 +35,20 @@ export const timeOf = (entry) => entry.key ?? entry.frame?.ts ?? entry.at;
  * backfills history chat by chat, so arrival order plays one chat at a time;
  * this order interleaves every chat by wall time, so simultaneous work plays
  * together. Each entry gets a `key` (ms): a slab's own `ts`; a session just
- * before the first slab of its chat or of any subagent under it (the relay
- * trims a chat's oldest slabs, so a chat can look younger than its subagents,
- * and a subagent must never arrive before its parent); any other frame (delta, state, tool) the key of the
+ * before the earliest of its own `started` time and the first slab of its
+ * chat or of any subagent under it. The relay sends only a session's last
+ * lines, so its first slab can come long after it started, and a chat can
+ * look younger than its subagents; a subagent must never arrive before its
+ * parent. Any other frame (delta, state, tool) takes the key of the
  * frame before it from the same chat, so a tool start follows its tool slab;
  * the arrival time when a chat has no timed frame yet. Ties keep arrival order.
  */
 export function ordered(log) {
-  const first = new Map(); // sid -> earliest slab ts
+  const first = new Map(); // sid -> earliest slab ts, or the session's own `started` when earlier
   for (const e of log) {
-    const { sid, ts } = e.frame ?? {};
-    if (sid != null && typeof ts === 'number') first.set(sid, Math.min(first.get(sid) ?? Infinity, ts));
+    const { sid, ts, started } = e.frame ?? {};
+    const t = e.type === 'session' ? started : ts;
+    if (sid != null && typeof t === 'number') first.set(sid, Math.min(first.get(sid) ?? Infinity, t));
   }
   // Lift each chat's earliest time up its parent chain, so a parent sorts before every subagent under it.
   const parentOf = new Map();

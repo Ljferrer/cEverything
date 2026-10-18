@@ -271,11 +271,14 @@ export async function start({
       if (!files.has(c.p)) await track(c.p, { sid: c.sid, kind: 'chat', sidecar: path.join(c.dir, c.sid, 'custom-title.json') });
       const agents = [];
       for (const p of await agentFiles(path.join(c.dir, c.sid, 'subagents'))) {
-        const mtime = await statMtime(p);
-        if (mtime !== null) agents.push({ p, mtime });
+        const st = await stat(p).catch(() => null);
+        if (st?.isFile()) agents.push({ p, mtime: st.mtimeMs, born: st.birthtimeMs || st.mtimeMs });
       }
+      // The cap keeps the most recently active agents; they are announced oldest
+      // first, so a client seats them in the order they started (its fan grows from the base).
       agents.sort((a, b) => b.mtime - a.mtime);
-      for (const a of agents.slice(0, Math.max(0, agentCap))) {
+      const kept = agents.slice(0, Math.max(0, agentCap)).sort((a, b) => a.born - b.born || a.p.localeCompare(b.p));
+      for (const a of kept) {
         if (files.has(a.p)) continue;
         const agentId = path.basename(a.p).slice('agent-'.length, -'.jsonl'.length);
         await track(a.p, { sid: agentId, kind: 'agent', parent: c.sid, meta: a.p.slice(0, -'.jsonl'.length) + '.meta.json' });
@@ -339,6 +342,18 @@ export async function start({
     });
   }
 
+  /** The first `timestamp` among the first lines of a transcript, as ms, or null. */
+  function firstTimestamp(data) {
+    const head = data.subarray(0, 64 * 1024).toString('utf8').split('\n').slice(0, 50);
+    for (const line of head) {
+      try {
+        const t = Date.parse(JSON.parse(line).timestamp);
+        if (Number.isFinite(t)) return t;
+      } catch {}
+    }
+    return null;
+  }
+
   async function track(p, { sid, kind, parent, sidecar, meta }) {
     const f = {
       path: p,
@@ -380,17 +395,20 @@ export async function start({
       if (f.messageLines > before) perLine.push(frames);
     }
     const seed = perLine.slice(-SEED_LINES).flat();
+    // When the session started: its first timestamped line, else the file's birth. The client
+    // replays a session from here, though only the last SEED_LINES lines are sent.
+    const started = firstTimestamp(data) ?? (st.birthtimeMs || st.mtimeMs);
 
     let title;
     let session;
     if (kind === 'agent') {
       const m = (await readJson(meta)) ?? {};
       title = typeof m.description === 'string' ? m.description : typeof m.agentType === 'string' ? m.agentType : sid;
-      session = compact({ t: 'session', sid, harness: 'claude', kind, title, status: currentStatus(f), parent, phase: typeof m.workflowPhase === 'string' ? m.workflowPhase : undefined });
+      session = compact({ t: 'session', sid, harness: 'claude', kind, title, status: currentStatus(f), parent, phase: typeof m.workflowPhase === 'string' ? m.workflowPhase : undefined, started });
     } else {
       const sc = await readJson(sidecar);
       title = deriveTitle({ customTitle: sc?.customTitle, customTitleLine: f.customTitleLine, firstUserText: f.firstUserText }) || sid;
-      session = { t: 'session', sid, harness: 'claude', kind, title, status: currentStatus(f) };
+      session = { t: 'session', sid, harness: 'claude', kind, title, status: currentStatus(f), started };
     }
     f.status = session.status;
     record(sid, title);
