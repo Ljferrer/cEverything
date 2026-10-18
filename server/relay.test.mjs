@@ -456,3 +456,45 @@ test('OBELISKS_PORT=0 with no --port yields a free port from the CLI', async () 
     child.kill();
   }
 });
+
+test('an editor picks the chats every viewer sees: left-out chats and their subagents stop streaming, and the pick persists', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'obelisks-include-'));
+  await mkdir(path.join(dir, 'sources'));
+  await writeFile(
+    path.join(dir, 'sources', 'hermes.mjs'),
+    `let emit;\nexport async function start(ctx) {\n  emit = ctx.emit;\n` +
+      `  emit({ t: 'session', sid: 'A', harness: 'hermes', kind: 'chat', title: 'keep', status: 'idle', parent: null, phase: null });\n` +
+      `  emit({ t: 'session', sid: 'A1', harness: 'hermes', kind: 'agent', title: 'kid', status: 'idle', parent: 'A', phase: null });\n` +
+      `  emit({ t: 'session', sid: 'B', harness: 'hermes', kind: 'chat', title: 'drop', status: 'idle', parent: null, phase: null });\n` +
+      `  emit({ t: 'slab', sid: 'B', id: 'b', role: 'user', text: 'hidden', ts: 1 });\n` +
+      `  globalThis.__later = () => { emit({ t: 'slab', sid: 'B', id: 'b2', role: 'user', text: 'still hidden', ts: 2 }); emit({ t: 'slab', sid: 'A1', id: 'k', role: 'assistant', text: 'shown', ts: 3 }); };\n}\n`,
+  );
+  const includeFile = path.join(dir, 'include.json');
+  const r = await relay({ sources: 'hermes', sourcesDir: path.join(dir, 'sources'), includeFile });
+  const viewer = connect(r);
+  const first = await viewer.until((f) => f.some((x) => x.t === 'chats'));
+  const list = first.find((x) => x.t === 'chats');
+  assert.deepEqual(list.chats.map((c) => [c.sid, c.agents]), [['A', 1], ['B', 0]], 'every main chat, with its subagent count');
+  assert.equal(list.include, null, 'every chat shows by default');
+
+  viewer.send({ t: 'include', sids: ['A'] });
+  await viewer.until((f) => f.some((x) => x.t === 'error'));
+  assert.equal(r.include, null, 'a viewer cannot change the pick');
+
+  const editor = connect(r, '?key=edit');
+  await editor.open;
+  editor.send({ t: 'include', sids: ['A'] });
+  await viewer.until((f) => f.some((x) => x.t === 'chats' && x.include?.[0] === 'A'));
+  globalThis.__later();
+  await viewer.until((f) => f.some((x) => x.id === 'k'));
+  assert.ok(!viewer.frames.some((x) => x.id === 'b2'), 'a left-out chat stops streaming');
+
+  const late = connect(r);
+  const frames = await late.until((f) => f.some((x) => x.id === 'k'));
+  assert.deepEqual([...new Set(frames.filter((x) => x.sid).map((x) => x.sid))], ['A', 'A1'], 'a late client gets only the picked chat and its subagent');
+  assert.deepEqual(JSON.parse(await readFile(includeFile, 'utf8')), ['A'], 'the pick is saved');
+
+  const again = await relay({ sources: 'synthetic', includeFile });
+  assert.deepEqual([...again.include], ['A'], 'a restarted relay keeps the pick');
+  for (const c of [viewer, editor, late]) c.ws.close();
+});
