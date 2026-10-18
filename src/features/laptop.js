@@ -50,17 +50,20 @@ export const WALK_SPEED = 4; // meters per second for WASD / arrow keys (Shift d
 export const PUSH_DISTANCE = 1.2; // a wheel-in closer than this moves the orbit point forward instead of stalling
 export const PUSH_STEP = 0.6;
 
+export const TURN_SPEED = Math.PI / 2; // radians per second for A/D and Left/Right
+export const ORBIT_RADIUS = 2; // drag looks around a point this close in front of the camera
+
 /**
- * Walk direction on the floor from held keys, relative to where the camera
- * faces: forward/back (W/S, Up/Down), strafe (A/D, Left/Right), rise/sink (E/Q).
- * Pure: returns {forward, right, up} in -1..1, so a test needs no DOM.
+ * Movement from held keys: W/S (Up/Down) walk forward and back, A/D
+ * (Left/Right) turn, Q/E strafe left and right. Pure: returns
+ * {forward, strafe, turn} in -1..1, so a test needs no DOM.
  */
 export function walkAxes(keys) {
   const has = (...k) => k.some((x) => keys.has(x));
   return {
     forward: (has('w', 'arrowup') ? 1 : 0) - (has('s', 'arrowdown') ? 1 : 0),
-    right: (has('d', 'arrowright') ? 1 : 0) - (has('a', 'arrowleft') ? 1 : 0),
-    up: (has('e') ? 1 : 0) - (has('q') ? 1 : 0),
+    strafe: (has('e') ? 1 : 0) - (has('q') ? 1 : 0),
+    turn: (has('a', 'arrowleft') ? 1 : 0) - (has('d', 'arrowright') ? 1 : 0),
   };
 }
 
@@ -89,6 +92,18 @@ export async function install({ camera, renderer, bus, net }) {
   controls.maxDistance = 80;
   controls.screenSpacePanning = true;
 
+  // Look around in place: when a drag starts, move the orbit point to just in
+  // front of the camera, so dragging turns your view instead of swinging the
+  // camera around a point far down the aisle.
+  const ahead = new THREE.Vector3();
+  const recenter = () => {
+    camera.getWorldDirection(ahead);
+    controls.target.copy(camera.position).addScaledVector(ahead, ORBIT_RADIUS);
+  };
+  renderer.domElement.addEventListener('pointerdown', (e) => {
+    if (e.button === 0) recenter();
+  });
+
   // Wheel-in past the orbit point keeps going: OrbitControls' zoom shrinks the
   // distance by a factor, so it stalls near the target. Close in, the wheel
   // instead moves the camera and the orbit point forward together.
@@ -105,8 +120,8 @@ export async function install({ camera, renderer, bus, net }) {
     { passive: true },
   );
 
-  // Walk with WASD or the arrow keys (Q/E sink and rise, Shift runs): the
-  // camera and its orbit point move together, so you stroll down the aisle.
+  // Walk with W/S, turn with A/D, strafe with Q/E (arrows walk and turn, Shift
+  // runs): the camera and its orbit point move together down the aisle.
   const held = new Set();
   const typing = (e) => /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName ?? '') || e.target?.isContentEditable;
   window.addEventListener('keydown', (e) => {
@@ -124,17 +139,25 @@ export async function install({ camera, renderer, bus, net }) {
   const rightV = new THREE.Vector3();
   const move = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
+  const yaw = new THREE.Quaternion();
+  const offset = new THREE.Vector3();
   bus.addEventListener('frame', (e) => {
-    const { forward, right, up: rise } = walkAxes(held);
-    if (forward || right || rise) {
+    const { forward, strafe, turn } = walkAxes(held);
+    if (forward || strafe || turn) {
       const dt = Math.min(0.1, e.detail?.dt ?? 0.016);
-      const speed = WALK_SPEED * (held.has('shift') ? 2 : 1) * dt;
+      const run = held.has('shift') ? 2 : 1;
+      if (turn) {
+        // Turn in place: swing the orbit point around the camera about the vertical axis.
+        yaw.setFromAxisAngle(up, turn * TURN_SPEED * dt);
+        offset.subVectors(controls.target, camera.position).applyQuaternion(yaw);
+        controls.target.copy(camera.position).add(offset);
+      }
+      const speed = WALK_SPEED * run * dt;
       camera.getWorldDirection(flatFwd);
       flatFwd.y = 0;
       flatFwd.normalize();
       rightV.crossVectors(flatFwd, up).normalize();
-      move.set(0, 0, 0).addScaledVector(flatFwd, forward * speed).addScaledVector(rightV, right * speed);
-      move.y += rise * speed;
+      move.set(0, 0, 0).addScaledVector(flatFwd, forward * speed).addScaledVector(rightV, strafe * speed);
       camera.position.add(move);
       controls.target.add(move);
     }

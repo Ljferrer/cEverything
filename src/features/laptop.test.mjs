@@ -106,9 +106,10 @@ test('the laptop camera starts behind the viewer spot, above eye height, looking
   assert.ok(tz < -RING_RADIUS, 'looks past the first chats');
 });
 
-test('walkAxes maps WASD, arrows and Q/E to forward, strafe and rise', () => {
-  assert.deepEqual(walkAxes(new Set()), { forward: 0, right: 0, up: 0 });
-  assert.deepEqual(walkAxes(new Set(['w', 'd'])), { forward: 1, right: 1, up: 0 });
-  assert.deepEqual(walkAxes(new Set(['arrowdown', 'arrowleft', 'q'])), { forward: -1, right: -1, up: -1 });
-  assert.deepEqual(walkAxes(new Set(['w', 's'])), { forward: 0, right: 0, up: 0 });
+test('walkAxes: W/S walk, A/D turn, Q/E strafe, arrows walk and turn', () => {
+  assert.deepEqual(walkAxes(new Set()), { forward: 0, strafe: 0, turn: 0 });
+  assert.deepEqual(walkAxes(new Set(['w', 'e'])), { forward: 1, strafe: 1, turn: 0 });
+  assert.deepEqual(walkAxes(new Set(['a'])), { forward: 0, strafe: 0, turn: 1 });
+  assert.deepEqual(walkAxes(new Set(['arrowdown', 'arrowright', 'q'])), { forward: -1, strafe: -1, turn: -1 });
+  assert.deepEqual(walkAxes(new Set(['w', 's', 'a', 'd'])), { forward: 0, strafe: 0, turn: 0 });
 });
