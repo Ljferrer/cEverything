@@ -26,7 +26,7 @@ registerHooks({
   },
 });
 
-const { createTimeline, timeOf, FRAME_TYPES } = await import('./timeline.js');
+const { createTimeline, createPlayer, playGap, timeOf, FRAME_TYPES, MAX_PLAY_GAP_MS } = await import('./timeline.js');
 
 function fakeBus() {
   const bus = Object.assign(new EventTarget(), { selected: null, selectedSlab: null });
@@ -175,4 +175,85 @@ test('pylons.js fires no projectile for a replayed start and ignores live tools 
   bus.scrubbed = false;
   bus.emit('tool', tool('a', 't3'));
   assert.equal(flying(), 1, 'a live start fires once the timeline is live');
+});
+
+/** A manual clock for createPlayer: `run()` fires the pending timer and returns its delay. */
+function fakeTimers() {
+  let next = null;
+  return {
+    setTimer: (fn, ms) => ((next = { fn, ms }), next),
+    clearTimer: (t) => next === t && (next = null),
+    get pending() {
+      return next;
+    },
+    run() {
+      const t = next;
+      next = null;
+      t.fn();
+      return t.ms;
+    },
+  };
+}
+
+test('advance shows the next frame by emitting only that frame, with no rebuild, and goes live at the newest', () => {
+  const bus = fakeBus();
+  let resets = 0;
+  const tl = createTimeline(bus, { reset: () => resets++ });
+  const frames = [session('a'), slab('a', 's1', 'one', 1), slab('a', 's2', 'two', 2), slab('a', 's3', 'three', 3)];
+  for (const f of frames) bus.emit(f.t, f);
+  tl.scrubTo(1);
+  const seen = spy(bus);
+  tl.advance();
+  assert.equal(resets, 1, 'advance never resets the room');
+  assert.deepEqual(seen.map((s) => s.detail.id), ['s2']);
+  assert.ok(seen[0].detail.replayed);
+  assert.equal(tl.index, 2);
+  tl.advance();
+  assert.equal(tl.live, true, 'the step to the newest frame is LIVE');
+  assert.equal(bus.scrubbed, false);
+});
+
+test('playGap is the arrival gap to the next frame, capped at MAX_PLAY_GAP_MS', () => {
+  const log = [{ at: 100 }, { at: 350 }, { at: 9000 }, { at: 8000 }];
+  assert.equal(playGap(log, 0), 250);
+  assert.equal(playGap(log, 1), MAX_PLAY_GAP_MS);
+  assert.equal(playGap(log, 2), 0, 'a clock step backwards waits 0 ms');
+  assert.equal(playGap(log, 3), 0, 'no next frame waits 0 ms');
+});
+
+test('play steps forward at the recorded pace until LIVE, and pause holds the frame', () => {
+  const bus = fakeBus();
+  let clock = 0;
+  const gaps = [0, 200, 300, 100, 400];
+  const tl = createTimeline(bus, { now: () => (clock += gaps.shift()) });
+  for (const f of [session('a'), slab('a', 's1', 'one', 1), slab('a', 's2', 'two', 2), slab('a', 's3', 'three', 3), slab('a', 's4', 'four', 4)]) bus.emit(f.t, f);
+  const timers = fakeTimers();
+  let ticks = 0;
+  const player = createPlayer(tl, { ...timers, onTick: () => ticks++ });
+
+  player.play();
+  assert.equal(player.playing, false, 'play does nothing while live');
+  assert.equal(timers.pending, null);
+
+  tl.scrubTo(0);
+  player.play();
+  assert.equal(player.playing, true);
+  assert.equal(timers.run(), 200, 'the first wait is the gap from frame 0 to frame 1');
+  assert.equal(tl.index, 1);
+  assert.equal(timers.run(), 300);
+  assert.equal(tl.index, 2);
+
+  player.pause();
+  assert.equal(player.playing, false);
+  assert.equal(timers.pending, null, 'pause clears the timer');
+  assert.equal(tl.index, 2, 'pause holds the frame');
+
+  player.play();
+  timers.run();
+  assert.equal(tl.index, 3);
+  timers.run();
+  assert.equal(tl.live, true, 'playback reaches the newest frame and goes live');
+  assert.equal(player.playing, false, 'playback stops at LIVE');
+  assert.equal(timers.pending, null);
+  assert.equal(ticks, 4);
 });
