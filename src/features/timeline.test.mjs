@@ -26,7 +26,7 @@ registerHooks({
   },
 });
 
-const { createTimeline, createPlayer, playGap, timeOf, FRAME_TYPES, MAX_PLAY_GAP_MS } = await import('./timeline.js');
+const { createTimeline, createPlayer, playGap, timeOf, toolStartFor, FRAME_TYPES, MAX_PLAY_GAP_MS } = await import('./timeline.js');
 
 function fakeBus() {
   const bus = Object.assign(new EventTarget(), { selected: null, selectedSlab: null });
@@ -225,12 +225,47 @@ test('playGap is the arrival gap to the next frame, capped at MAX_PLAY_GAP_MS', 
   assert.equal(playGap(log, 3), 0, 'no next frame waits 0 ms');
 });
 
+test('playGap paces backfilled history by ts: frames that arrived together keep their recorded gaps', () => {
+  const log = [{ at: 5, frame: { ts: 1000 } }, { at: 5, frame: { ts: 1400 } }, { at: 5, frame: {} }, { at: 90, frame: { ts: 1 } }];
+  assert.equal(playGap(log, 0), 400, 'both frames carry ts, so the ts gap wins over a 0 ms arrival gap');
+  assert.equal(playGap(log, 1), 0, 'one frame has no ts, so the arrival gap applies');
+  assert.equal(playGap(log, 2), 85);
+});
+
+test('toolStartFor reads a tool slab as a tool start, and nothing else', () => {
+  const ts = { t: 'slab', sid: 'a', id: 'tu1', role: 'tool', text: 'Bash ls /tmp', ts: 1 };
+  assert.deepEqual(toolStartFor(ts), { t: 'tool', sid: 'a', id: 'tu1', name: 'Bash', phase: 'start' });
+  assert.equal(toolStartFor({ ...ts, text: 'mcp__x__y\n{"a":1}' }).name, 'mcp__x__y');
+  assert.equal(toolStartFor({ ...ts, role: 'assistant' }), null);
+  assert.equal(toolStartFor({ ...ts, text: '' }), null);
+  assert.equal(toolStartFor(tool('a', 'tu1')), null);
+});
+
+test('a Play step onto a backfilled tool slab emits its tool start after the slab; a logged start is never doubled', () => {
+  const bus = fakeBus();
+  const tl = createTimeline(bus);
+  const toolSlab = (id) => ({ t: 'slab', sid: 'a', id, role: 'tool', text: 'Read {"file_path":"x"}', ts: 2 });
+  for (const f of [session('a'), slab('a', 's1', 'one', 1), toolSlab('tu1'), toolSlab('tu2'), tool('a', 'tu2'), slab('a', 's2', 'two', 3)]) bus.emit(f.t, f);
+  tl.scrubTo(1);
+  const seen = spy(bus);
+  tl.advance();
+  assert.deepEqual(seen.map((s) => [s.type, s.detail.id]), [['slab', 'tu1'], ['tool', 'tu1']]);
+  assert.deepEqual(seen[1].detail, { t: 'tool', sid: 'a', id: 'tu1', name: 'Read', phase: 'start', replayed: true, playback: true });
+  seen.length = 0;
+  tl.advance();
+  tl.advance();
+  assert.deepEqual(seen.map((s) => [s.type, s.detail.id]), [['slab', 'tu2'], ['tool', 'tu2']], 'tu2 has its own logged start, so only that one plays');
+  seen.length = 0;
+  tl.scrubTo(2);
+  assert.equal(seen.filter((s) => s.type === 'tool').length, 0, 'a rebuild emits no tool starts');
+});
+
 test('play steps forward at the recorded pace until LIVE, and pause holds the frame', () => {
   const bus = fakeBus();
   let clock = 0;
   const gaps = [0, 200, 300, 100, 400];
   const tl = createTimeline(bus, { now: () => (clock += gaps.shift()) });
-  for (const f of [session('a'), slab('a', 's1', 'one', 1), slab('a', 's2', 'two', 2), slab('a', 's3', 'three', 3), slab('a', 's4', 'four', 4)]) bus.emit(f.t, f);
+  for (const f of [session('a'), slab('a', 's1', 'one'), slab('a', 's2', 'two'), slab('a', 's3', 'three'), slab('a', 's4', 'four')]) bus.emit(f.t, f);
   const timers = fakeTimers();
   let ticks = 0;
   const player = createPlayer(tl, { ...timers, onTick: () => ticks++ });
