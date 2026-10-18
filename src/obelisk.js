@@ -1,5 +1,5 @@
 // One session = one obelisk (PIN-1): a stone base in its state color, a title label, and
-// a vertical stack of message slabs, newest on top. The look is a homage to the
+// a vertical stack of message slabs, newest at the bottom. The look is a homage to the
 // SEELE monoliths: a matte black body with red edges stands behind the stack,
 // and a red glyph ("Ψ 03") over a red "SOUND ONLY" line tops it. Each frame `update(camera)`
 // picks a LOD band per slab (PIN-13) and shows full text, the mid summary, or a
@@ -327,8 +327,9 @@ export class Obelisk extends THREE.Group {
     }
   }
 
-  // Oldest at the bottom, newest on top, each slab's bottom at the summed
-  // measured heights of the slabs below it; only the last MAX_VISIBLE show,
+  // Newest at the bottom, so the stack grows upward like a chat log: each new
+  // slab lands on the base and pushes the older ones up. Each slab's bottom is
+  // at the summed measured heights of the slabs below it; only the last MAX_VISIBLE show,
   // slabs past MAX_KEPT are disposed. Above the stack go the title, the SOUND
   // ONLY line, and the glyph; the body reaches from the base to above the
   // glyph, at least to MIN_BODY_TOP with the glyph at its top, and the beacon
@@ -340,12 +341,13 @@ export class Obelisk extends THREE.Group {
     const heights = shown.map(
       (slab) => slabHeight({ band: slab.band, textRenderInfo: slab.text.textRenderInfo }) + (slab.band === 'far' ? 0 : 2 * CARD_PAD),
     );
-    const { offsets, height } = stackLayout(heights);
+    const { offsets, height } = stackLayout(heights.toReversed()); // stackLayout runs bottom to top
     this.slabs.forEach((slab, i) => {
       slab.visible = i >= firstVisible;
       if (!slab.visible) return;
-      const h = heights[i - firstVisible];
-      slab.position.y = offsets[i - firstVisible];
+      const j = i - firstVisible;
+      const h = heights[j];
+      slab.position.y = offsets[shown.length - 1 - j];
       slab.outline.scale.set(SLAB_WIDTH + 2 * CARD_PAD, h, 1);
       slab.panel?.scale.copy(slab.outline.scale);
     });
