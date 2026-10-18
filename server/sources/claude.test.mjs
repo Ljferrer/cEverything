@@ -400,3 +400,27 @@ test('read-only module: start exported, sendCommand and handle absent, bad root 
   assert.ok(!('sendCommand' in claude));
   await assert.rejects(() => start({ emit: quiet, root: path.join(os.tmpdir(), 'obelisks-no-such-root-' + Date.now()), log: quiet }));
 });
+
+test('a chat\'s subagents are announced in the order they started, not by latest activity', async (t) => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'obelisks-claude-born-'));
+  const proj = path.join(tmp, 'proj');
+  const subs = path.join(proj, 'chat', 'subagents');
+  fs.mkdirSync(subs, { recursive: true });
+  fs.writeFileSync(path.join(proj, 'chat.jsonl'), userLine('c-u1', 'Parent chat', 'chat') + '\n');
+  const agentLine = (id) => JSON.stringify({ isSidechain: true, agentId: id, type: 'user', uuid: `${id}-u1`, timestamp: '2026-10-17T20:00:00.000Z', message: { role: 'user', content: `${id} task` }, cwd: '/tmp/demo', sessionId: 'chat' }) + '\n';
+  for (const id of ['first', 'second', 'third']) {
+    fs.writeFileSync(path.join(subs, `agent-${id}.jsonl`), agentLine(id));
+    await sleep(30); // distinct birth times
+  }
+  // The first-born agent is the most recently active one.
+  const later = new Date(Date.now() + 60_000);
+  fs.utimesSync(path.join(subs, 'agent-first.jsonl'), later, later);
+  const s = sink();
+  const h = await start({ emit: s.emit, root: tmp, pollMs: 200, rescanMs: 500, log: quiet });
+  t.after(() => h.stop());
+  await s.until((f) => f.filter((x) => x.t === 'session' && x.kind === 'agent').length === 3, 5000, 'three agents');
+  assert.deepEqual(s.frames.filter((x) => x.t === 'session' && x.kind === 'agent').map((x) => x.sid), ['first', 'second', 'third']);
+  const first = s.frames.find((x) => x.t === 'session' && x.sid === 'first');
+  assert.equal(first.started, Date.parse('2026-10-17T20:00:00.000Z'), 'a session carries when it started: its first timestamped line');
+  assert.ok(isServerEvent(first));
+});

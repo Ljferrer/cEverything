@@ -158,12 +158,18 @@ function onSession(session) {
 }
 
 // A per-viewer convenience: the room works the same with no storage at all.
+// Subagent seats before CHILD_ORDER were given newest first; such a map keeps
+// its chats' slots and drops its subagent seats once, so they reseat oldest first.
+const CHILD_ORDER = 'started-v2'; // v2: maps saved while the relay still sent newest first are reseated too
+
 function loadSlots() {
   try {
     const v = JSON.parse(globalThis.localStorage?.getItem(STORE_KEY) ?? 'null');
-    if (v && typeof v.root === 'object' && typeof v.child === 'object' && v.root && v.child) return v;
+    if (v && typeof v.root === 'object' && typeof v.child === 'object' && v.root && v.child) {
+      return v.childOrder === CHILD_ORDER ? v : { root: v.root, child: {}, childOrder: CHILD_ORDER };
+    }
   } catch {}
-  return { root: {}, child: {} };
+  return { root: {}, child: {}, childOrder: CHILD_ORDER };
 }
 
 function saveSlots() {

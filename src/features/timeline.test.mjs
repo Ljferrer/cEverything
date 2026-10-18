@@ -295,6 +295,15 @@ test('a chat replays before its subagents even when the relay kept only its newe
   assert.deepEqual(order, ['session:p', 'session:k', 'session:g', 'g1', 'k1', 'p9']);
 });
 
+test('a session replays from when it started, not from its first kept slab', () => {
+  const bus = fakeBus();
+  const tl = createTimeline(bus, { now: () => 1_000_000 });
+  // The relay kept only the late lines of a long subagent that started first.
+  for (const f of [session('p'), { ...session('long'), kind: 'agent', parent: 'p', started: 100 }, slab('long', 'l9', 'late', 900),
+    { ...session('short'), kind: 'agent', parent: 'p', started: 300 }, slab('short', 's1', 'early', 350)]) bus.emit(f.t, f);
+  assert.deepEqual(tl.log.map((e) => (e.type === 'session' ? `session:${e.frame.sid}` : e.frame.id)), ['session:p', 'session:long', 'session:short', 's1', 'l9']);
+});
+
 test('play steps forward at the recorded pace until LIVE, and pause holds the frame', () => {
   const bus = fakeBus();
   const tl = createTimeline(bus);
