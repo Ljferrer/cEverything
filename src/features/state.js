@@ -57,8 +57,10 @@ export function install(ctx) {
       }
     });
 
-  bus.addEventListener('state', (e) => apply(e.detail));
-  bus.addEventListener('session', (e) => apply(e.detail));
+  // While timeline.js holds the room scrubbed back (`bus.scrubbed`), only its re-emitted (`replayed`) frames apply.
+  const shown = (e) => (!bus.scrubbed || e.detail?.replayed) && apply(e.detail);
+  bus.addEventListener('state', shown);
+  bus.addEventListener('session', shown);
 
   // A cosine pulse: the state color at 0 and 1000 ms, the idle color at 500 ms.
   bus.addEventListener('frame', (e) => {
