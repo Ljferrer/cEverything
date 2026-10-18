@@ -6,6 +6,10 @@
 // the camera each frame. Frames for a sid with no obelisk and for spawning
 // tools are dropped (PIN-50). This is the only plan 4 file
 // that adds objects to the scene (PIN-56); it never edits plan 1's files.
+// Each pylon also has a textured face box inside its wireframe, from a
+// Higgsfield render in public/assets/pylon-<name>.jpg. The face stays hidden
+// until its texture loads, so a missing file keeps the plain wireframe look,
+// and the face brightens with the wireframe during the glow.
 import * as THREE from 'three';
 import { Text } from 'troika-three-text';
 import { getObelisk as roomGetObelisk } from './room.js';
@@ -18,6 +22,9 @@ export const PYLON_WIDTH = 0.6;
 export const GLOW_MS = 2000;
 const BASE_COLOR = new THREE.Color(0x546e7a); // slate, the idle state color
 const GLOW_COLOR = new THREE.Color(0xffffff);
+const FACE_IDLE = new THREE.Color(0.75, 0.75, 0.75); // the face texture, a little dimmed
+const FACE_GLOW = new THREE.Color(2.6, 1.8, 1.8); // over 1, so the dark stone and red emblem flare
+const FACE_INSET = 0.98; // inside the wireframe, so its edges never z-fight the face
 const STARTS_KEPT = 256; // remembered `start` args; a lost `complete` never leaks past this
 
 /**
@@ -32,6 +39,19 @@ export const PLACE = Object.freeze({
   shell: { x: -8, z: -12 },
   other: { x: 8, z: -12 },
 });
+
+/** The face texture URL for a pylon name. */
+export const textureUrl = (name) => `/assets/pylon-${name}.jpg`;
+
+/** Load a texture in the background; a failed load (or no DOM, as under node) only logs. */
+function loadTexture(url, onLoad) {
+  const fail = () => console.log(`pylons: ${url} failed to load`);
+  try {
+    new THREE.TextureLoader().load(url, onLoad, undefined, fail);
+  } catch {
+    fail();
+  }
+}
 
 const _from = new THREE.Vector3();
 const _to = new THREE.Vector3();
@@ -50,7 +70,7 @@ function makeLabel(text, fontSize, y, anchorY) {
   return t;
 }
 
-function makePylon(name) {
+function makePylon(name, load) {
   const g = new THREE.Group();
   g.name = `pylon:${name}`;
   const box = new THREE.Mesh(
@@ -60,12 +80,27 @@ function makePylon(name) {
   box.position.y = PYLON_HEIGHT / 2;
   box.userData = { kind: 'pylon', pylon: name };
   g.add(box);
+  const face = new THREE.Mesh(
+    new THREE.BoxGeometry(PYLON_WIDTH * FACE_INSET, PYLON_HEIGHT * FACE_INSET, PYLON_WIDTH * FACE_INSET),
+    new THREE.MeshBasicMaterial({ color: FACE_IDLE }),
+  );
+  face.name = `pylon:${name}:face`;
+  face.position.y = PYLON_HEIGHT / 2;
+  face.visible = false; // shown once the texture arrives
+  face.userData = { kind: 'pylon', pylon: name };
+  g.add(face);
+  load(textureUrl(name), (tex) => {
+    tex.colorSpace = THREE.SRGBColorSpace;
+    face.material.map = tex;
+    face.material.needsUpdate = true;
+    face.visible = true;
+  });
   const label = makeLabel(name, 0.24, PYLON_HEIGHT + 0.1, 'bottom');
   g.add(label);
   const p = PLACE[name];
   g.position.set(p.x, 0, p.z);
   g.lookAt(0, 0, 0); // the labels sit on the face toward the room center; install turns them to the camera each frame
-  return { group: g, box, label, glowUntil: -Infinity };
+  return { group: g, box, face, label, glowUntil: -Infinity };
 }
 
 /** The filesystem detail text (PIN-54): the file's basename and `+n/-m`, short enough to fit the pylon. */
@@ -79,15 +114,15 @@ function baseOf(obelisk) {
   return obelisk.base ?? obelisk;
 }
 
-export function install({ scene, bus, getObelisk = roomGetObelisk }) {
+export function install({ scene, bus, getObelisk = roomGetObelisk, load = loadTexture }) {
   const group = new THREE.Group();
   group.name = 'pylons';
   scene.add(group);
 
-  /** @type {Record<string, {group: THREE.Group, box: THREE.Mesh, label: Text, glowUntil: number}>} */
+  /** @type {Record<string, {group: THREE.Group, box: THREE.Mesh, face: THREE.Mesh, label: Text, glowUntil: number}>} */
   const pylons = {};
   for (const name of PYLONS) {
-    pylons[name] = makePylon(name);
+    pylons[name] = makePylon(name, load);
     group.add(pylons[name].group);
   }
   // Second label on the filesystem pylon: the last completed file's basename and +n/-m (PIN-54).
@@ -152,6 +187,7 @@ export function install({ scene, bus, getObelisk = roomGetObelisk }) {
       const p = pylons[name];
       const k = Math.max(0, Math.min(1, (p.glowUntil - now) / GLOW_MS));
       p.box.material.color.copy(BASE_COLOR).lerp(GLOW_COLOR, k);
+      p.face.material.color.copy(FACE_IDLE).lerp(FACE_GLOW, k);
     }
   }
 }
